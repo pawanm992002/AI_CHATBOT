@@ -51,6 +51,8 @@ async def list_knowledge_gaps(
     if gap_type:
         query_filter["gap_type"] = gap_type
 
+    total = await db.knowledge_gaps.count_documents(query_filter)
+
     cursor = db.knowledge_gaps.find(query_filter).sort("count", -1).skip(skip).limit(limit)
     gaps = await cursor.to_list(limit)
 
@@ -86,7 +88,7 @@ async def list_knowledge_gaps(
         except Exception as e:
             print(f"[KNOWLEDGE] error processing gap: {e}")
 
-    return result
+    return {"items": result, "total": total, "page": (skip // limit) + 1, "page_size": limit, "total_pages": max(1, -(-total // limit))}
 
 
 @router.post("/gaps/{gap_id}/resolve")

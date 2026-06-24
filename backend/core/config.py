@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     ENFORCE_DOMAIN: bool = False
     REDIS_URI: str = "redis://localhost:6379/0"
     APP_ENV: str = "development"
+    MAX_CRAWL_PAGES: int = 100
 
     model_config = SettingsConfigDict(
         env_file=env_file_path, 

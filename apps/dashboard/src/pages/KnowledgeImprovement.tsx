@@ -10,7 +10,9 @@ import {
   TrendingUp,
   X,
   Lock,
-  Link as LinkIcon
+  Link as LinkIcon,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -28,13 +30,18 @@ const KnowledgeImprovement = () => {
   const [sources, setSources] = useState<Source[]>([]);
   const [resolving, setResolving] = useState<string | null>(null);
   const [faqForm, setFaqForm] = useState({ question: '', answer: '', source_id: '' });
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [pageSize, setPageSize] = useState(20);
   const { rbacError, triggerRbacError } = useRbacError();
 
   const isEditor = hasAccess(state.role, 'write');
 
   const fetchGaps = useCallback(async () => {
     try {
-      let url = `/dashboard/knowledge/gaps?status=${filter}`;
+      const skip = (page - 1) * pageSize;
+      let url = `/dashboard/knowledge/gaps?status=${filter}&limit=${pageSize}&skip=${skip}`;
       if (gapType) url += `&gap_type=${gapType}`;
       
       const [gapsRes, statsRes, sourcesRes] = await Promise.all([
@@ -43,7 +50,9 @@ const KnowledgeImprovement = () => {
         privateAxios.get('/dashboard/sources'),
       ]);
 
-      setGaps(gapsRes.data);
+      setGaps(gapsRes.data.items);
+      setTotal(gapsRes.data.total);
+      setTotalPages(gapsRes.data.total_pages);
       dispatch({ type: 'SET_STATS', payload: statsRes.data });
       setSources(sourcesRes.data);
     } catch (err) {
@@ -51,7 +60,11 @@ const KnowledgeImprovement = () => {
     } finally {
       setLoading(false);
     }
-  }, [filter, gapType, dispatch]);
+  }, [filter, gapType, page, dispatch]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [filter, gapType, pageSize]);
 
   useEffect(() => {
     fetchGaps();
@@ -396,6 +409,43 @@ const KnowledgeImprovement = () => {
               )}
             </div>
           ))
+        )}
+
+        {total > 0 && (
+          <div className="px-6 py-4 border-t border-slate-800 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-slate-500">
+                Page {page} of {totalPages} ({total} total)
+              </span>
+              <select
+                value={pageSize}
+                onChange={(e) => setPageSize(Number(e.target.value))}
+                className="rounded-lg border border-slate-800 bg-slate-900 px-2 py-1 text-xs text-slate-400 focus:border-violet-600 focus:outline-none cursor-pointer"
+              >
+                <option value={20}>20 / page</option>
+                <option value={50}>50 / page</option>
+                <option value={100}>100 / page</option>
+              </select>
+            </div>
+            {totalPages > 1 && (
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                  disabled={page <= 1}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-800 text-xs font-semibold text-slate-400 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  <ChevronLeft size={14} /> Prev
+                </button>
+                <button
+                  onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                  disabled={page >= totalPages}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-800 text-xs font-semibold text-slate-400 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  Next <ChevronRight size={14} />
+                </button>
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>

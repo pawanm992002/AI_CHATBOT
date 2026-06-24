@@ -69,14 +69,31 @@ async def crawl_task(tenant_id: str, seed_url: str, job_id: str, source_id: str 
     )
 
 
+async def _check_credits() -> dict:
+    """Check current Firecrawl credit balance."""
+    headers = {"Authorization": f"Bearer {settings.FIRECRAWL_API_KEY}"}
+    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+        resp = await client.get("https://api.firecrawl.dev/v1/team", headers=headers)
+        if resp.status_code == 200:
+            return resp.json()
+    return {}
+
+
 async def _start_firecrawl_job(seed_url: str) -> Optional[str]:
     headers = {"Authorization": f"Bearer {settings.FIRECRAWL_API_KEY}"}
+    # Ensure URL has a protocol for Firecrawl
+    url = seed_url if seed_url.startswith(("http://", "https://")) else f"https://{seed_url}"
+
+    # Credit safety: warn if limit is high
+    if settings.MAX_CRAWL_PAGES > 100:
+        print(f"[FIRECRAWL] WARNING: MAX_CRAWL_PAGES={settings.MAX_CRAWL_PAGES} — each page costs 1 credit")
+
     async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
         crawl_response = await client.post(
             "https://api.firecrawl.dev/v2/crawl",
             headers=headers,
             json={
-                "url": seed_url,
+                "url": url,
                 "limit": settings.MAX_CRAWL_PAGES,
                 "maxConcurrency": 10,
                 "scrapeOptions": {
@@ -87,7 +104,7 @@ async def _start_firecrawl_job(seed_url: str) -> Optional[str]:
         print(f"[FIRECRAWL] POST /v2/crawl status={crawl_response.status_code}")
         print(f"[FIRECRAWL] Response: {crawl_response.text[:500]}")
         if crawl_response.status_code == 402:
-            raise ValueError("Crawl service limit reached. Please try again later or contact support.")
+            raise ValueError("Crawl service limit reached (out of credits). Please upgrade your plan or contact support.")
         crawl_response.raise_for_status()
         return crawl_response.json()["id"]
 
@@ -140,6 +157,11 @@ async def _poll_and_process(job: dict):
             return
 
         data = resp.json()
+        if resp.status_code == 404:
+            error_msg = data.get("error", "Job not found") if isinstance(data, dict) else "Job not found"
+            print(f"[CRAWL_MONITOR] Job {job_id}: Firecrawl job not found (404): {error_msg}")
+            await _fail_job(job_id, f"Crawl job not found or expired. {error_msg}")
+            return
         status = data.get("status")
         total = data.get("total", 0)
         completed = data.get("completed", 0)
