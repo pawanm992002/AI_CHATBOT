@@ -91,3 +91,31 @@ If you prefer to configure the Web Services manually instead of using blueprints
 ## Rebuilding the Frontend
 
 After pushing changes to GitHub, Render automatically builds and deploys both the frontend and backend together.
+
+---
+
+## Deploy via PM2 (Self-Hosted / VPS)
+
+For deploying on a self-hosted Linux server or VPS using PM2:
+
+1. **Build the frontend assets and sync Python dependencies**:
+   ```bash
+   pnpm install
+   pnpm build
+   uv sync
+   ```
+
+2. **Configure environment variables**:
+   Ensure you have a `.env` or `.env.production` file in your project root with the correct credentials.
+
+3. **Start the application with PM2**:
+   ```bash
+   pm2 start ecosystem.config.js --env production
+   ```
+
+4. **Manage the process**:
+   - Check status: `pm2 status`
+   - View real-time logs: `pm2 logs ai-chatbot-backend`
+   - Restart the app: `pm2 restart ai-chatbot-backend`
+   - Stop the app: `pm2 stop ai-chatbot-backend`
+
