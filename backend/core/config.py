@@ -1,19 +1,22 @@
 import os
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pathlib import Path
 
-# Traverse up from core/ to project root
-_dir = os.path.dirname(os.path.abspath(__file__))
-backend_dir = os.path.dirname(_dir)
-project_root = os.path.dirname(backend_dir)
+project_root = Path(__file__).resolve().parents[2]
 
-app_env = os.getenv("APP_ENV", "development").lower()
-if app_env == "production":
-    env_file_path = os.path.join(project_root, ".env.production")
-elif app_env == "staging":
-    env_file_path = os.path.join(project_root, ".env.staging")
-else:
-    env_file_path = os.path.join(project_root, ".env")
+env_files_priority = [
+    ".env.production",
+    ".env.staging",
+    ".env"
+]
 
+env_file_path = None
+for env_file in env_files_priority:
+    potential_path = project_root / env_file
+    if potential_path.exists():
+        env_file_path = potential_path
+        break
+    
 class Settings(BaseSettings):
     MONGODB_URI: str = "mongodb://localhost:27017"
     MONGODB_DB_NAME: str = "chatbot_db"
@@ -25,8 +28,14 @@ class Settings(BaseSettings):
     COOKIE_SAMESITE: str = "lax"
     ENFORCE_DOMAIN: bool = False
     REDIS_URI: str = "redis://localhost:6379/0"
+    APP_ENV: str = "development"
 
-    model_config = SettingsConfigDict(env_file=env_file_path, extra='ignore')
+    model_config = SettingsConfigDict(
+        env_file=env_file_path, 
+        extra='ignore',
+        env_file_encoding='utf-8'
+    )
 
 settings = Settings()
 
+print(f'APP ENV: {settings.APP_ENV}')

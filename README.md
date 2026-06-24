@@ -159,13 +159,13 @@ flowchart TD
 - Firecrawl API Key
 
 ## 1. Setup Environment
-Use `backend/.env.example` as the template:
+Use `.env.production.example` as the template:
 
 ```bash
-cp backend/.env.example .env
+cp .env.production.example .env
 ```
 
-For Docker Compose, keep the copied `.env` in the project root. For manual backend development, you can also copy it to `backend/.env` because the backend loads `.env` from its working directory.
+Keep the `.env` file in the project root directory. The backend loads the `.env` file from the project root.
 
 Update the values:
 ```bash
@@ -256,7 +256,6 @@ npm run build
 **Terminal 2: Start the Backend**
 ```bash
 cd backend
-cp .env.example .env
 python3 -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
