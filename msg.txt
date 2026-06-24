@@ -1,0 +1,307 @@
+========================================
+  COMPLETE CHAT FLOW OVERVIEW
+  AI Chatbot Widget - Backend
+========================================
+
+========================================
+  FLOW DIAGRAM
+========================================
+
+    ┌─────────────────────────────┐
+    │      User sends message     │
+    └─────────────┬───────────────┘
+                  │
+                  ▼
+    ┌─────────────────────────────┐
+    │  1. REQUEST RECEIVED        │
+    │  - Auth (API key)           │
+    │  - Rate limit check         │
+    │  - Session resolution       │
+    │  - Visitor tracking         │
+    └─────────────┬───────────────┘
+                  │
+                  ▼
+    ┌─────────────────────────────┐
+    │  2. GREETING CHECK          │
+    │  (regex - no LLM)          │
+    └─────────────┬───────────────┘
+                  │
+          ┌───────┴───────┐
+          │  Is greeting? │
+          └───────┬───────┘
+            YES   │   NO
+            │     │
+            │     ▼
+            │  ┌─────────────────────────────┐
+            │  │  3. QUERY REWRITE            │
+            │  │  (GPT-4o-mini)              │
+            │  │  Classify:                  │
+            │  │  - GREETING                 │
+            │  │  - OUT_OF_SCOPE             │
+            │  │  - SEARCH QUERY             │
+            │  └─────────────┬───────────────┘
+            │                │
+            │        ┌───────┴───────┐
+            │        │ needs_search? │
+            │        └───────┬───────┘
+            │          YES   │   NO
+            │          │     │
+            │          ▼     │
+            │  ┌─────────────────────────────┐
+            │  │  4. VECTOR SEARCH            │
+            │  │  - text-embedding-3-small    │
+            │  │  - Vector search (3 slots)   │
+            │  │  - BM25 search (2 slots)     │
+            │  │  - Merge + dedup             │
+            │  └─────────────┬───────────────┘
+            │                │
+            │        ┌───────┴───────┐
+            │        │ Score >= 0.75?│
+            │        └───────┬───────┘
+            │          YES   │   NO
+            │          │     │
+            │          │     ▼
+            │          │  ┌─────────────────────────────┐
+            │          │  │  6. NO MATCH PATH           │
+            │          │  │  - Evaluate reason          │
+            │          │  │  - Generate response        │
+            │          │  │  - Log knowledge gap        │
+            │          │  └─────────────┬───────────────┘
+            │          │                │
+            │          │                │
+            │          ▼                │
+            │  ┌─────────────────────────────┐
+            │  │  5. LOAD CONVERSATION HISTORY│
+            │  │  - Redis cache (1hr TTL)     │
+            │  │  - MongoDB fallback          │
+            │  └─────────────┬───────────────┘
+            │                │
+            │                ▼
+            │  ┌─────────────────────────────┐
+            │  │  7. MATCH FOUND PATH        │
+            │  │  - Format context            │
+            │  │  - Build sources list        │
+            │  │  - Generate system prompt    │
+            │  │  - GPT-4o response           │
+            │  └─────────────┬───────────────┘
+            │                │
+            │                ▼
+            │  ┌─────────────────────────────┐
+            │  │  8. POST-PROCESSING          │
+            │  │  - Strip [ENQUIRY_FORM]      │
+            │  │  - Context summarization     │
+            │  │  - Update MongoDB + Redis    │
+            │  └─────────────┬───────────────┘
+            │                │
+            ▼                ▼
+    ┌─────────────────────────────┐
+    │      Return Response        │
+    │  - answer                   │
+    │  - sources (if matched)     │
+    │  - show_enquiry_form        │
+    └─────────────────────────────┘
+
+
+========================================
+  DETAILED STEPS
+========================================
+
+1. REQUEST RECEIVED
+-------------------
+POST /chat endpoint (chat.py:51)
+- Authenticates tenant via API key (verify_api_key dependency)
+- Validates query length (max 500 chars)
+- Checks per-tenant rate limit (100 req/min)
+- Checks per-session rate limit (20 req/min)
+- Resolves session via cookie or request body
+- Sets session cookie (1 year expiry)
+- Upserts visitor document in MongoDB (IP, page views, timestamps)
+
+2. GREETING CHECK (Fast Path)
+------------------------------
+Function: _is_greeting() (chat.py:403)
+- Regex pattern matches common greetings: hi, hello, hey, namaste, thanks, etc.
+- If matched → return canned greeting immediately
+- Example: "Hello! Welcome to {business_name}. How can I help you today?"
+- NO LLM call needed → fast response
+
+3. QUERY REWRITE + CLASSIFICATION
+----------------------------------
+Function: _rewrite_search_query() (chat.py:442)
+- Uses GPT-4o-mini to classify user message into ONE of three categories:
+
+  a) GREETING → needs_search=False, is_out_of_scope=False
+     Examples: hi, hello, how are you, thanks, bye
+
+  b) OUT_OF_SCOPE → needs_search=False, is_out_of_scope=True
+     ONLY when clearly unrelated to business:
+     - Famous people, coding, weather, politics, celebrities
+     - General knowledge/trivia
+     - CRITICAL: If possibly about business → always classify as search
+
+  c) SEARCH QUERY → needs_search=True, is_out_of_scope=False
+     - Translates to English if needed
+     - Rewrites as concise search query
+     - Example: "tell me about this website" → "what is this website about"
+
+- Results cached in memory (_query_rewrite_cache)
+- System prompt: _QUERY_REWRITE_SYSTEM_PROMPT (chat.py:363-392)
+
+4. VECTOR SEARCH (if needs_search=True)
+----------------------------------------
+Function: search_chunks() (vector_search.py:52)
+- Embeds query using text-embedding-3-small
+- Runs TWO searches in parallel:
+
+  a) Vector Search (_vector_search)
+     - MongoDB Atlas $vectorSearch
+     - Searches 'chunks' collection
+     - Returns 3 results (guaranteed slots)
+
+  b) BM25 Text Search (_bm25_search)
+     - MongoDB Atlas $search (text index)
+     - Keyword-based matching
+     - Returns 2 results (guaranteed slots)
+
+- Merges results, deduplicates by parent_id
+- If BM25 doesn't fill slots → fills with more vector results
+
+- TOP SCORE THRESHOLD: 0.75
+  - If top chunk score < 0.75 → treat as NO MATCH (chunks = [])
+
+5. CONVERSATION HISTORY RETRIEVAL
+----------------------------------
+- Check Redis cache first (key: chat_session:{session_id})
+  - TTL: 1 hour
+- Fallback to MongoDB if cache miss
+- Stores: summary + messages (last 20 messages = 10 turns)
+
+6. NO MATCH PATH (chunks is empty)
+-----------------------------------
+Step 6a: Evaluate Reason
+Function: _evaluate_no_match() (chat.py:409)
+- Uses GPT-4o-mini to classify:
+  - OUT_OF_SCOPE: clearly unrelated (sports, weather, politics, etc.)
+  - KNOWLEDGE_GAP: could be business-related but no data found
+- Default: KNOWLEDGE_GAP if unsure
+
+Step 6b: Generate Response
+- OUT_OF_SCOPE prompt (chat.py:186):
+  "You can only help with questions about {business_name}"
+
+- KNOWLEDGE_GAP prompt (chat.py:188-191):
+  - Includes tenant's description: "About this website: {description}"
+  - If user asks about website → use description to provide overview
+  - If asking about pricing/demo/purchasing → append [ENQUIRY_FORM]
+  - Otherwise → politely say you don't have that information
+
+- LLM: GPT-4o
+- Response language: English/Hindi/Hinglish based on user input
+
+Step 6c: Post-Processing
+- Strip [ENQUIRY_FORM] marker if present
+- Append answer to messages
+- Context summarization if messages >= 10 (keep last 4, summarize rest)
+- Update MongoDB + Redis cache
+- Log knowledge gap with embedding for similarity clustering
+- Return response with no sources
+
+7. MATCH FOUND PATH (chunks exist)
+------------------------------------
+Step 7a: Format Context
+- Format chunks into context_text (chat.py:241-244)
+- Each chunk: "Source (url) - title - section: text"
+
+Step 7b: Build Sources List
+- Deduplicate by (url, section_path)
+- Return Source objects: url, title, section_title, section_path
+
+Step 7c: Generate System Prompt
+- If needs_search=False (greeting but got chunks):
+  "Respond conversationally, do not answer unrelated questions"
+
+- If needs_search=True (search query):
+  "Answer based on provided context. Do not make up information."
+  Includes: current page URL, title, context_text
+
+Step 7d: Generate Response
+- LLM: GPT-4o
+- Messages: system_prompt + summary (if exists) + last 20 messages
+- Response language: English/Hindi/Hinglish based on user input
+- If asking about pricing/demo → append [ENQUIRY_FORM]
+
+Step 7e: Post-Processing
+- Strip [ENQUIRY_FORM] marker if present
+- Append answer to messages
+- Context summarization if messages >= 10
+- Update MongoDB + Redis cache
+- Return response with sources
+
+8. CONTEXT SUMMARIZATION
+-------------------------
+Function: _summarize_past_context() (chat.py:488)
+- Triggered when messages >= 10
+- Keeps last 4 messages, summarizes older ones
+- Uses GPT-4o-mini
+- Keeps summary under 80 words
+- Focus: visitor's intent, questions, key info (names, choices, issues)
+- Previous summary is included for continuity
+
+9. KNOWLEDGE GAP LOGGING
+--------------------------
+Function: _log_knowledge_gap() (chat.py:523)
+- Generates embedding for the query
+- Finds similar existing gaps (cosine similarity > 0.85)
+- If similar gap exists → increment count
+- Otherwise → create new gap entry
+- Stored in knowledge_gaps collection
+- Fields: tenant_id, query, url, gap_type, embedding, count, status
+
+10. RESPONSE FORMAT
+--------------------
+ChatResponse:
+  - message_id: unique UUID
+  - answer: LLM response text
+  - sources: list of Source objects (url, title, section_title, section_path)
+  - show_enquiry_form: boolean (True if [ENQUIRY_FORM] was in response)
+
+========================================
+  KEY FILES
+========================================
+- backend/routers/chat.py           → Main chat endpoint, all prompts
+- backend/services/vector_search.py → Vector + BM25 hybrid search
+- backend/services/embedder.py      → OpenAI embedding client
+- backend/services/ingestion.py     → Document chunking + embedding
+- backend/services/crawler.py       → Website crawling via Firecrawl
+- backend/routers/tenants.py        → Tenant registration
+- backend/core/config.py            → Environment config
+- backend/core/auth.py              → API key verification, MongoDB
+
+========================================
+  LLM MODELS USED
+========================================
+- GPT-4o          → Main response generation
+- GPT-4o-mini     → Query rewrite, classification, summarization
+- text-embedding-3-small → Vector embeddings
+
+========================================
+  RATE LIMITS
+========================================
+- Global: 60 requests/minute (FastAPI limiter)
+- Per-tenant: 100 requests/minute (in-memory)
+- Per-session: 20 requests/minute (in-memory)
+
+========================================
+  STORAGE
+========================================
+- MongoDB Collections:
+  - tenants: business config, description, theme
+  - chunks: indexed content with embeddings
+  - parents: parent sections of chunks
+  - conversations: session history (summary + messages)
+  - visitors: visitor tracking (IP, page views)
+  - knowledge_gaps: unmatched queries
+  - message_feedback: user ratings
+
+- Redis:
+  - chat_session:{session_id} → cached conversation (1hr TTL)

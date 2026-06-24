@@ -1,0 +1,27 @@
+@import "tailwindcss" important;
+
+/* Reset spacing, margin, and borders for all standard elements inside the widget to prevent host site CSS leakage */
+#chat-widget-container div,
+#chat-widget-container p,
+#chat-widget-container button,
+#chat-widget-container input,
+#chat-widget-container textarea,
+#chat-widget-container span,
+#chat-widget-container svg,
+#chat-widget-container a,
+#chat-widget-container ul,
+#chat-widget-container ol,
+#chat-widget-container li,
+#chat-widget-container img,
+#chat-widget-container h1,
+#chat-widget-container h2,
+#chat-widget-container h3,
+#chat-widget-container h4,
+#chat-widget-container h5,
+#chat-widget-container h6,
+#chat-widget-container form {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  border: 0 solid transparent;
+}

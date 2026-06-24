@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test — $business_name</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #0f172a;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #e2e8f0;
+        }
+        .test-badge {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #1e293b;
+            color: #94a3b8;
+            padding: 8px 16px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            z-index: 9999;
+            border: 1px solid #334155;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .test-badge::before {
+            content: "";
+            width: 6px;
+            height: 6px;
+            background: #22d3ee;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+        .card {
+            text-align: center;
+            max-width: 480px;
+            padding: 48px 40px;
+        }
+        .card-icon {
+            width: 64px;
+            height: 64px;
+            margin: 0 auto 24px;
+            background: linear-gradient(135deg, #7c3aed, #a855f7);
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 8px 32px rgba(124, 58, 237, 0.3);
+        }
+        .card-icon svg {
+            width: 32px;
+            height: 32px;
+            fill: none;
+            stroke: #fff;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+        .card h1 {
+            font-size: 22px;
+            font-weight: 700;
+            color: #f1f5f9;
+            margin-bottom: 8px;
+        }
+        .card p {
+            font-size: 14px;
+            color: #64748b;
+            line-height: 1.6;
+            margin-bottom: 32px;
+        }
+        .hint {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: #1e293b;
+            padding: 10px 20px;
+            border-radius: 999px;
+            font-size: 13px;
+            color: #94a3b8;
+            border: 1px solid #334155;
+        }
+        .hint kbd {
+            background: #334155;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            color: #e2e8f0;
+            font-family: inherit;
+        }
+        .powered-by {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 11px;
+            color: #475569;
+            z-index: 9998;
+        }
+        .powered-by a {
+            color: #818cf8;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        .powered-by a:hover {
+            color: #a5b4fc;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-badge">Test Mode — $business_name</div>
+
+    <div class="card">
+        <div class="card-icon">
+            <svg viewBox="0 0 24 24">
+                <path d="M12 2a10 10 0 1 0 5.5 18.5l3.5 1.5-1.5-3.5A10 10 0 0 0 12 2z"/>
+                <path d="M8 11h8"/>
+                <path d="M8 15h5"/>
+            </svg>
+        </div>
+        <h1>$business_name</h1>
+        <p>Your AI assistant is ready. Click the chat bubble in the corner to start a conversation.</p>
+        <div class="hint">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="M12 16v-4"/>
+                <path d="M12 8h.01"/>
+            </svg>
+            Chat widget appears in the bottom-right
+        </div>
+    </div>
+
+    <div class="powered-by">
+        Powered by <a href="https://your-platform.com" target="_blank" rel="noopener">AI Chatbot Platform</a>
+    </div>
+    <script src="/static/widget.js" data-api-key="$api_key" data-api-base-url="$api_base_url"></script>
+</body>
+</html>

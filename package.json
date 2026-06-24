@@ -1,0 +1,23 @@
+{
+  "name": "ai-chatbot-widget-monorepo",
+  "private": true,
+  "workspaces": [
+    "apps/dashboard",
+    "apps/widget",
+    "packages/shared"
+  ],
+  "scripts": {
+    "build:widget": "npm run build --workspace=widget",
+    "build:dashboard": "npm run build --workspace=dashboard",
+    "build": "npm run build --workspaces",
+    "dev:dashboard": "npm run dev --workspace=dashboard",
+    "dev:widget": "npm run dev --workspace=widget",
+    "dev:backend": "uv run uvicorn main:app --app-dir backend --reload",
+    "dev": "concurrently --kill-others \"npm run dev:backend\" \"npm run dev:dashboard\" \"npm run dev:widget\"",
+    "start": "npm run build && uv run uvicorn main:app --app-dir backend --host 0.0.0.0 --port ${PORT:-8000}",
+    "clean": "rm -rf node_modules apps/*/node_modules packages/*/node_modules apps/*/dist packages/*/dist .venv backend/.venv && find . -type d -name \"__pycache__\" -exec rm -rf {} +"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
