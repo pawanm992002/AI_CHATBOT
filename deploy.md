@@ -59,7 +59,7 @@ If you prefer to configure the Web Services manually instead of using blueprints
    - **Environment**: `Python 3`
    - **Build Command**:
      ```bash
-     cd .. && npm install && npm run build && cd backend && uv sync --frozen && uv cache prune --ci
+     cd .. && npm install -g pnpm && pnpm install --frozen-lockfile && pnpm build && cd backend && uv sync --frozen && uv cache prune --ci
      ```
    - **Start Command**:
      ```

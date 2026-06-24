@@ -10,7 +10,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
-    "@chatbot/shared": "*",
+    "@chatbot/shared": "workspace:*",
     "@tailwindcss/vite": "^4.3.1",
     "axios": "^1.18.0",
     "lucide-react": "^0.359.0",

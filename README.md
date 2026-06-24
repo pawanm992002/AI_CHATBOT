@@ -152,7 +152,8 @@ flowchart TD
 ```
 
 ## Prerequisites
-- Docker & Docker Compose
+- Node.js & pnpm
+- Python 3.12+ (with uv package manager)
 - MongoDB Atlas cluster
 - Redis server (local or hosted)
 - OpenAI API Key
@@ -231,45 +232,28 @@ The backend also creates regular MongoDB lookup indexes on startup for parent-ch
 
 ## 3. Run the Platform
 
-### Option A: Using Docker (Recommended)
-Start the services using Docker Compose:
+You can run the monorepo locally with pnpm and uv.
+
+### Installation
+From the root directory, install all frontend dependencies:
 ```bash
-docker-compose up --build
-```
-This will:
-- Build the widget bundle
-- Start the FastAPI backend on `http://localhost:8000`
-- Start the React Dashboard on `http://localhost:3000`
-
-For deployed environments, set `VITE_API_BASE_URL` before building the dashboard so its API calls and generated widget snippet point at your backend URL.
-
-### Option B: Without Docker (Manual Setup)
-If you prefer running the services locally without Docker, you will need three separate terminal windows.
-
-**Terminal 1: Build the Widget**
-```bash
-cd widget
-npm install
-npm run build
+pnpm install
 ```
 
-**Terminal 2: Start the Backend**
+### Running the Services
+Start all servers (Backend + Dashboard + Widget dev server) concurrently:
 ```bash
-cd backend
-python3 -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+pnpm dev
 ```
-*(Note: If using `uv`, you can run `uv pip install -r requirements.txt` instead of regular pip).*
+This will start:
+- FastAPI backend on `http://localhost:8000`
+- React Dashboard on `http://localhost:5173`
+- React Chat Widget dev server on `http://localhost:5174`
 
-**Terminal 3: Start the Dashboard**
-```bash
-cd dashboard
-npm install
-export VITE_API_BASE_URL=http://localhost:8000
-npm run dev
-```
+If you prefer to run services manually, you can use:
+- **Run Backend:** `pnpm dev:backend`
+- **Run Dashboard:** `pnpm dev:dashboard`
+- **Run Widget:** `pnpm dev:widget`
 
 ## 4. Usage
 1. Open the Dashboard at `http://localhost:3000`.
@@ -294,8 +278,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 **Terminal 2 — Start the widget dev server:**
 ```bash
-cd widget
-npm run dev
+pnpm --filter widget dev
 ```
 
 **Terminal 3 — Open the test page:**
@@ -327,8 +310,7 @@ The test page (`test-embed.html`) simulates a real client website with:
 
 To test the production IIFE build instead of the Vite dev server:
 ```bash
-cd widget
-npm run build
+pnpm --filter widget build
 ```
 Then serve the `dist/` folder and update the `<script>` src in `test-embed.html` to point to the built file:
 ```html
