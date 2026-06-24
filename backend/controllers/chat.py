@@ -185,13 +185,17 @@ async def chat(request: Request, req: ChatRequest, fastapi_response: Response, c
 
         messages.append({"role": "user", "content": req.query})
 
+        description = current_tenant.get("description") or ""
         if gap_type == "out_of_scope":
             no_match_prompt = f"""You are a representative of {business_name} — always speak as "we" and "our", never as "{business_name}" or a third party. The user's question is unrelated to our business. Politely let them know you can only help with questions about {business_name}. CRITICAL: You MUST ONLY reply in English, Hindi, or Hinglish. If the user writes in English, reply in English. If the user writes in Hindi (Devanagari script), reply in Hindi. If the user writes in Hinglish, reply in Hinglish. NEVER use any other language."""
-        else:
-            description = current_tenant.get("description", "")
-            description_context = f"\n\nAbout this website: {description}" if description else ""
-            no_match_prompt = f"""You are a representative of {business_name} — always speak as "we" and "our", never as "{business_name}" or a third party.{description_context}
+        elif description:
+            no_match_prompt = f"""You are a representative of {business_name} — always speak as "we" and "our", never as "{business_name}" or a third party.
+
+About this website: {description}
 If the user asks about this website, what it does, or what it offers, use the description above to provide a helpful overview. Do not make up information beyond what is provided. CRITICAL: You MUST ONLY reply in English, Hindi, or Hinglish (a mix of Hindi and English). If the user writes in English, reply in English. If the user writes in Hindi (Devanagari script), reply in Hindi. If the user writes in Hinglish (Hindi written in English script), reply in Hinglish. NEVER use any other language. However, if the user is asking about pricing, demo, purchasing, or wants to be contacted, offer to help and at the end of your response append [ENQUIRY_FORM]. Otherwise, politely say you don't have that information."""
+        else:
+            no_match_prompt = f"""You are a representative of {business_name} — always speak as "we" and "our", never as "{business_name}" or a third party.
+You do not have information about this question. Politely say you don't have that information and suggest the user contact us for more details. CRITICAL: You MUST ONLY reply in English, Hindi, or Hinglish. If the user writes in English, reply in English. If the user writes in Hindi (Devanagari script), reply in Hindi. If the user writes in Hinglish, reply in Hinglish. NEVER use any other language. However, if the user is asking about pricing, demo, purchasing, or wants to be contacted, offer to help and at the end of your response append [ENQUIRY_FORM]."""
 
         if summary:
             no_match_prompt += f"\n\nHere is a summary of the conversation so far:\n{summary}"
@@ -459,13 +463,17 @@ async def websocket_chat(websocket: WebSocket, key_hash: str = Query(...)):
                 gap_type = await _evaluate_no_match(query, tenant.get("description"))
                 messages.append({"role": "user", "content": query})
 
+                description = tenant.get("description") or ""
                 if gap_type == "out_of_scope":
                     system_prompt = f"You are a representative of {business_name} — always speak as \"we\" and \"our\", never as \"{business_name}\" or a third party. The user's question is unrelated to our business. Politely let them know you can only help with questions about {business_name}. CRITICAL: You MUST ONLY reply in English, Hindi, or Hinglish. If the user writes in English, reply in English. If the user writes in Hindi (Devanagari script), reply in Hindi. If the user writes in Hinglish, reply in Hinglish. NEVER use any other language."
-                else:
-                    description = tenant.get("description", "")
-                    description_context = f"\n\nAbout this website: {description}" if description else ""
-                    system_prompt = f"""You are a representative of {business_name} — always speak as "we" and "our", never as "{business_name}" or a third party.{description_context}
+                elif description:
+                    system_prompt = f"""You are a representative of {business_name} — always speak as "we" and "our", never as "{business_name}" or a third party.
+
+About this website: {description}
 If the user asks about this website, what it does, or what it offers, use the description above to provide a helpful overview. Do not make up information beyond what is provided. CRITICAL: You MUST ONLY reply in English, Hindi, or Hinglish (a mix of Hindi and English). If the user writes in English, reply in English. If the user writes in Hindi (Devanagari script), reply in Hindi. If the user writes in Hinglish (Hindi written in English script), reply in Hinglish. NEVER use any other language. However, if the user is asking about pricing, demo, purchasing, or wants to be contacted, offer to help and at the end of your response append [ENQUIRY_FORM]. Otherwise, politely say you don't have that information."""
+                else:
+                    system_prompt = f"""You are a representative of {business_name} — always speak as "we" and "our", never as "{business_name}" or a third party.
+You do not have information about this question. Politely say you don't have that information and suggest the user contact us for more details. CRITICAL: You MUST ONLY reply in English, Hindi, or Hinglish. If the user writes in English, reply in English. If the user writes in Hindi (Devanagari script), reply in Hindi. If the user writes in Hinglish, reply in Hinglish. NEVER use any other language. However, if the user is asking about pricing, demo, purchasing, or wants to be contacted, offer to help and at the end of your response append [ENQUIRY_FORM]."""
 
                 if summary:
                     system_prompt += f"\n\nHere is a summary of the conversation so far:\n{summary}"
