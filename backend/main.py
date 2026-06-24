@@ -88,20 +88,9 @@ async def cleanup_stale_jobs():
     from datetime import datetime, timezone
     from repositories.crawl_job_repository import CrawlJobRepository
     repo = CrawlJobRepository()
-
-    # -- Jobs that never got a firecrawl_job_id (queued/running but not yet dispatched)
     modified = await repo.mark_stale_running_as_failed()
     if modified:
-        print(f"[STARTUP] Marked {modified} unstarted DB job(s) as failed")
-
-    # -- Jobs with a firecrawl_job_id are left alone — Firecrawl will retry
-    # webhook delivery and we'll fetch pages fresh from its API at that point.
-
-    # -- Fail stale source_jobs that have no corresponding active crawl
-    await db.source_jobs.update_many(
-        {"status": {"$in": ["queued", "running"]}},
-        {"$set": {"status": "failed", "error": "Server restarted", "finished_at": datetime.now(timezone.utc)}}
-    )
+        print(f"Cleaned up {modified} stale crawl job(s)")
 
 
 @app.on_event("startup")

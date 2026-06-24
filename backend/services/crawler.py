@@ -1,13 +1,13 @@
 import asyncio
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
 
 import httpx
 from core.auth import db
 from services.ingestion import ingest_document
 from services.suggested import generate_suggested_questions
 from core.config import settings
+
 
 def normalize_url(url: str) -> str:
     url = url.strip().lower()
@@ -19,32 +19,30 @@ def normalize_url(url: str) -> str:
 
 
 async def crawl_task(tenant_id: str, seed_url: str, job_id: str, source_id: str = ""):
-    """Phase 1: start a Firecrawl job and persist its ID, then return immediately.
-       Webhooks from Firecrawl handle all subsequent processing."""
     print(f"[CRAWL {job_id}] Starting crawl for seed_url={seed_url}")
 
-    # ── Critical block ────────────────────────────────────────────────────────
-    # Any failure here means the crawl genuinely did not start, so we fail the job.
+    await db.crawl_jobs.update_one(
+        {"job_id": job_id},
+        {"$set": {
+            "status": "running",
+            "started_at": datetime.now(timezone.utc),
+            "embedding_errors": 0,
+            "error": None,
+        }}
+    )
+    await db.source_jobs.update_one(
+        {"job_id": job_id},
+        {"$set": {
+            "status": "running",
+            "started_at": datetime.now(timezone.utc),
+        }}
+    )
+
     try:
         if not settings.FIRECRAWL_API_KEY:
             raise ValueError("FIRECRAWL_API_KEY is not configured")
 
-        await db.crawl_jobs.update_one(
-            {"job_id": job_id},
-            {"$set": {
-                "status": "running",
-                "started_at": datetime.now(timezone.utc),
-                "embedding_errors": 0,
-                "error": None,
-            }}
-        )
-        await db.source_jobs.update_one(
-            {"job_id": job_id},
-            {"$set": {
-                "status": "running",
-                "started_at": datetime.now(timezone.utc),
-            }}
-        )
+        print(f"[CRAWL {job_id}] FIRECRAWL_API_KEY is set (len={len(settings.FIRECRAWL_API_KEY)})")
 
         # Purge all old data for this site before re-crawling
         old_jobs = await db.crawl_jobs.find(
@@ -58,313 +56,200 @@ async def crawl_task(tenant_id: str, seed_url: str, job_id: str, source_id: str 
             await db.parents.delete_many({"tenant_id": tenant_id, "crawl_id": {"$in": old_crawl_ids}})
             await db.pages.delete_many({"tenant_id": tenant_id, "crawl_id": {"$in": old_crawl_ids}})
 
-        firecrawl_job_id = await _start_firecrawl_job(seed_url, metadata={
-            "job_id": job_id,
-            "tenant_id": tenant_id,
-            "source_id": source_id,
-            "seed_url": seed_url,
-        })
-        print(f"[CRAWL {job_id}] Firecrawl job started: {firecrawl_job_id}")
+        pages = await _crawl_with_firecrawl(seed_url)
+        print(f"[CRAWL {job_id}] Firecrawl returned {len(pages)} pages")
 
-    except Exception as e:
-        print(f"[CRAWL {job_id}] Failed to start crawl: {e}")
-        await _fail_job(job_id, str(e))
-        return
+        pages_found = 0
+        chunks_created = 0
+        embedding_errors = 0
 
-    # ── Best-effort metadata write ────────────────────────────────────────────
-    # Firecrawl is already running. A DB failure here must NOT kill the job —
-    # webhooks will arrive and complete the crawl regardless. Just log a warning.
-    try:
+        for i, page in enumerate(pages):
+            print(f"[CRAWL {job_id}] Processing page {i+1}/{len(pages)}: {page.get('metadata', {}).get('sourceURL', 'unknown')}")
+            result = await _index_page(tenant_id, job_id, page, source_id)
+            if not result:
+                print(f"[CRAWL {job_id}] Page {i+1} skipped (no content or too short)")
+                continue
+
+            chunks_created += result["chunks_created"]
+            embedding_errors += result["embedding_errors"]
+            if result["indexed"]:
+                pages_found += 1
+
+            await db.crawl_jobs.update_one(
+                {"job_id": job_id},
+                {"$set": {
+                    "pages_found": pages_found,
+                    "chunks_created": chunks_created,
+                    "embedding_errors": embedding_errors,
+                }}
+            )
+            await db.source_jobs.update_one(
+                {"job_id": job_id},
+                {"$set": {
+                    "chunks_created": chunks_created,
+                    "embedding_errors": embedding_errors,
+                }}
+            )
+
+        print(f"[CRAWL {job_id}] Done. pages_found={pages_found}, chunks_created={chunks_created}, embedding_errors={embedding_errors}")
         await db.crawl_jobs.update_one(
             {"job_id": job_id},
-            {"$set": {"firecrawl_job_id": firecrawl_job_id}}
+            {"$set": {
+                "status": "done",
+                "pages_found": pages_found,
+                "chunks_created": chunks_created,
+                "error": None,
+                "finished_at": datetime.now(timezone.utc)
+            }}
         )
+        await db.source_jobs.update_one(
+            {"job_id": job_id},
+            {"$set": {
+                "status": "done",
+                "pages_found": pages_found,
+                "chunks_created": chunks_created,
+                "error": None,
+                "finished_at": datetime.now(timezone.utc)
+            }}
+        )
+
+        # Auto-generate suggested questions after successful crawl
+        if pages_found > 0:
+            asyncio.create_task(generate_suggested_questions(tenant_id))
+            asyncio.create_task(_generate_business_description(tenant_id, job_id))
+
     except Exception as e:
-        print(f"[CRAWL {job_id}] WARNING: Could not save firecrawl_job_id to DB: {e}. "
-              f"Crawl is running on Firecrawl as {firecrawl_job_id} and will complete via webhooks.")
+        print(f"[CRAWL {job_id}] FAILED: {e}")
+        import traceback
+        traceback.print_exc()
+        await db.crawl_jobs.update_one(
+            {"job_id": job_id},
+            {"$set": {
+                "status": "failed",
+                "error": str(e),
+                "finished_at": datetime.now(timezone.utc)
+            }}
+        )
+        await db.source_jobs.update_one(
+            {"job_id": job_id},
+            {"$set": {
+                "status": "failed",
+                "error": str(e),
+                "finished_at": datetime.now(timezone.utc)
+            }}
+        )
 
 
-async def _check_credits() -> dict:
-    """Check current Firecrawl credit balance."""
-    headers = {"Authorization": f"Bearer {settings.FIRECRAWL_API_KEY}"}
-    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
-        resp = await client.get("https://api.firecrawl.dev/v1/team", headers=headers)
-        if resp.status_code == 200:
-            return resp.json()
-    return {}
-
-
-async def _start_firecrawl_job(seed_url: str, metadata: dict = None) -> Optional[str]:
-    headers = {"Authorization": f"Bearer {settings.FIRECRAWL_API_KEY}"}
+async def _crawl_with_firecrawl(seed_url: str) -> list[dict]:
     # Ensure URL has a protocol for Firecrawl
     url = seed_url if seed_url.startswith(("http://", "https://")) else f"https://{seed_url}"
 
-    # Credit safety: warn if limit is high
-    if settings.MAX_CRAWL_PAGES > 100:
-        print(f"[FIRECRAWL] WARNING: MAX_CRAWL_PAGES={settings.MAX_CRAWL_PAGES} — each page costs 1 credit")
-
-    payload = {
-        "url": url,
-        "limit": settings.MAX_CRAWL_PAGES,
-        "maxConcurrency": 10,
-        "scrapeOptions": {
-            "formats": ["markdown"],
-        }
-    }
-
-    # Add webhook if PUBLIC_URL is configured
-    if settings.PUBLIC_URL:
-        payload["webhook"] = {
-            "url": f"{settings.PUBLIC_URL}/webhook/firecrawl",
-            "metadata": metadata or {},
-            "events": ["completed", "failed"],
-        }
-        print(f"[FIRECRAWL] Webhook configured: {settings.PUBLIC_URL}/webhook/firecrawl")
-
-    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
+    headers = {"Authorization": f"Bearer {settings.FIRECRAWL_API_KEY}"}
+    async with httpx.AsyncClient(timeout=httpx.Timeout(connect=60.0, read=120.0, write=60.0, pool=60.0)) as client:
         crawl_response = await client.post(
             "https://api.firecrawl.dev/v2/crawl",
             headers=headers,
-            json=payload
+            json={
+                "url": url,
+                "limit": settings.MAX_CRAWL_PAGES,
+                "scrapeOptions": {
+                    "formats": ["markdown"],
+                }
+            }
         )
         print(f"[FIRECRAWL] POST /v2/crawl status={crawl_response.status_code}")
         print(f"[FIRECRAWL] Response: {crawl_response.text[:500]}")
         if crawl_response.status_code == 402:
             raise ValueError("Crawl service limit reached (out of credits). Please upgrade your plan or contact support.")
         crawl_response.raise_for_status()
-        return crawl_response.json()["id"]
+        firecrawl_job_id = crawl_response.json()["id"]
+        print(f"[FIRECRAWL] Job ID: {firecrawl_job_id}")
 
+        # Timeout after 8 minutes
+        max_wait = 480
+        elapsed = 0
 
+        max_retries = 3
+        retry_delay = 10
 
-async def _fetch_and_process_crawled_pages(
-    firecrawl_job_id: str,
-    tenant_id: str,
-    job_id: str,
-    source_id: str = "",
-    seed_url: str = "",
-):
-    """Fetch all scraped pages from Firecrawl's API and process them."""
-    try:
-        job = await db.crawl_jobs.find_one({"job_id": job_id})
-        if job and job.get("status") == "done":
-            print(f"[CRAWL {job_id}] Already done, skipping")
-            return
-        if job and job.get("status") in ("failed", "purged"):
-            print(f"[CRAWL {job_id}] Job status is '{job['status']}', skipping processing")
-            return
-
-        # Check if bulk insert already completed (crash after insert, before finalize)
-        existing_count = await db.pages.count_documents({"tenant_id": tenant_id, "crawl_id": job_id})
-        if existing_count > 0:
-            print(f"[CRAWL {job_id}] Found {existing_count} existing pages, skipping to finalize")
-            await db.crawl_jobs.update_one(
-                {"job_id": job_id},
-                {"$set": {"status": "done", "pages_found": existing_count, "error": None, "finished_at": datetime.now(timezone.utc)}}
-            )
-            await db.source_jobs.update_one(
-                {"job_id": job_id},
-                {"$set": {"status": "done", "pages_found": existing_count, "error": None, "finished_at": datetime.now(timezone.utc)}}
-            )
-            return
-
-        # Fetch all pages from Firecrawl API
-        headers = {"Authorization": f"Bearer {settings.FIRECRAWL_API_KEY}"}
-        pages = []
-        page_data = None
-        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
-            url = f"https://api.firecrawl.dev/v2/crawl/{firecrawl_job_id}"
-            while url:
-                resp = await client.get(url, headers=headers)
-                if resp.status_code != 200:
-                    print(f"[CRAWL {job_id}] Firecrawl API returned {resp.status_code}")
-                    await _fail_job(job_id, f"Failed to fetch crawl results: HTTP {resp.status_code}")
-                    return
-                page_data = resp.json()
-                pages.extend(page_data.get("data", []))
-                url = page_data.get("next")
-        print(f"[CRAWL {job_id}] Fetched {len(pages)} pages from Firecrawl API")
-
-        if not pages:
-            await _fail_job(job_id, "Crawl completed but no pages returned from Firecrawl")
-            return
-
-        from services.ingestion import (
-            _build_parent_sections, _split_child_chunks, embed_texts,
-            EMBEDDING_BATCH_SIZE, count_tokens, MARKDOWN_HEADERS,
-            CHILD_CHUNK_TOKENS, CHILD_CHUNK_OVERLAP_TOKENS,
-        )
-        from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
-        from services.tokens import TOKEN_ENCODING_NAME
-
-        parent_splitter_inst = MarkdownHeaderTextSplitter(
-            headers_to_split_on=MARKDOWN_HEADERS, strip_headers=False,
-        )
-        child_splitter_inst = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
-            encoding_name=TOKEN_ENCODING_NAME,
-            chunk_size=CHILD_CHUNK_TOKENS, chunk_overlap=CHILD_CHUNK_OVERLAP_TOKENS,
-        )
-
-        all_page_docs = []
-        all_parent_docs = []
-        all_chunk_docs = []
-        embedding_errors = 0
-
-        for i, page in enumerate(pages):
-            url = page.get("metadata", {}).get("sourceURL", "")
-            content = page.get("markdown", "").strip()
-            title = page.get("metadata", {}).get("title", "")
-
-            if not content or len(content) < 50 or not url:
-                print(f"[CRAWL {job_id}] Skipping page {i+1}: empty or too short")
-                continue
-
-            print(f"[CRAWL {job_id}] Processing page {i+1}/{len(pages)}: {url}")
-            doc_id = str(uuid.uuid4())
-
-            parent_sections = _build_parent_sections(parent_splitter_inst, content, title)
-            if not parent_sections:
-                continue
-
-            page_doc = {
-                "tenant_id": tenant_id, "source_id": source_id, "page_id": doc_id,
-                "url": url, "title": title, "content": content,
-                "crawl_id": job_id, "indexed_at": datetime.now(timezone.utc),
-            }
-            all_page_docs.append(page_doc)
-
-            for parent_index, section in enumerate(parent_sections):
-                parent_id = f"{doc_id}:{parent_index}"
-                parent_text = section["text"]
-                all_parent_docs.append({
-                    "tenant_id": tenant_id, "source_id": source_id, "page_id": doc_id,
-                    "parent_id": parent_id, "url": url, "title": title,
-                    "section_title": section["section_title"], "section_path": section["section_path"],
-                    "headings": section["headings"], "text": parent_text,
-                    "token_count": count_tokens(parent_text), "parent_index": parent_index,
-                    "crawl_id": job_id, "indexed_at": datetime.now(timezone.utc),
-                })
-
-                child_chunks = _split_child_chunks(child_splitter_inst, parent_text)
-                for child_index, child in enumerate(child_chunks):
-                    all_chunk_docs.append({
-                        "tenant_id": tenant_id, "source_id": source_id, "page_id": doc_id,
-                        "parent_id": parent_id, "url": url, "title": title,
-                        "section_title": section["section_title"], "section_path": section["section_path"],
-                        "headings": section["headings"], "text": child,
-                        "search_text": f"{section['section_title'] or section['section_path']}:\n{child}",
-                        "token_count": count_tokens(f"{section['section_title'] or section['section_path']}:\n{child}"),
-                        "parent_index": parent_index, "child_index": child_index,
-                        "chunk_index": len(all_chunk_docs),
-                        "crawl_id": job_id, "indexed_at": datetime.now(timezone.utc),
-                    })
-
-        if not all_chunk_docs:
-            print(f"[CRAWL {job_id}] No chunks produced, marking failed")
-            await _fail_job(job_id, "No content to index")
-            return
-
-        # Embed ALL chunks in batches
-        print(f"[CRAWL {job_id}] Embedding {len(all_chunk_docs)} chunks")
-        for start in range(0, len(all_chunk_docs), EMBEDDING_BATCH_SIZE):
-            batch = all_chunk_docs[start:start + EMBEDDING_BATCH_SIZE]
+        while elapsed < max_wait:
+            await asyncio.sleep(5)
+            elapsed += 5
             try:
-                embeddings = await embed_texts([item["search_text"] for item in batch])
-            except Exception as exc:
-                print(f"[CRAWL {job_id}] Embedding batch failed: {exc}")
-                embedding_errors += len(batch)
-                continue
-
-            if len(embeddings) != len(batch):
-                embedding_errors += len(batch)
-                continue
-
-            for offset, (chunk, embedding) in enumerate(zip(batch, embeddings)):
-                if not embedding:
-                    embedding_errors += 1
+                status_response = await client.get(
+                    f"https://api.firecrawl.dev/v2/crawl/{firecrawl_job_id}",
+                    headers=headers
+                )
+            except (httpx.ConnectError, httpx.RemoteProtocolError) as e:
+                if max_retries > 0:
+                    max_retries -= 1
+                    print(f"[FIRECRAWL] Poll ({elapsed}s): Connection error ({e}), retrying in {retry_delay}s... (retries left: {max_retries})")
+                    await asyncio.sleep(retry_delay)
+                    elapsed += retry_delay
                     continue
-                chunk["embedding"] = embedding
+                raise
 
-        all_chunk_docs = [c for c in all_chunk_docs if "embedding" in c]
+            if status_response.status_code == 429:
+                print(f"[FIRECRAWL] Poll ({elapsed}s): Rate limited, retrying in 10s...")
+                await asyncio.sleep(10)
+                elapsed += 10
+                continue
+            if not status_response.text.strip():
+                print(f"[FIRECRAWL] Poll ({elapsed}s): Empty response, retrying in 5s...")
+                continue
+            status_data = status_response.json()
+            print(f"[FIRECRAWL] Poll ({elapsed}s): status={status_data.get('status')}, total={status_data.get('total')}, completed={status_data.get('completed')}, failed={status_data.get('failed')}")
 
-        if not all_chunk_docs:
-            print(f"[CRAWL {job_id}] All embeddings failed, marking failed")
-            await _fail_job(job_id, "All embedding attempts failed")
-            return
+            if status_data["status"] == "completed":
+                data = status_data.get("data", [])
+                print(f"[FIRECRAWL] Completed with {len(data)} pages")
+                return data
+            if status_data["status"] == "failed":
+                print(f"[FIRECRAWL] Job failed: {status_data}")
+                raise RuntimeError(f"Firecrawl job failed: {status_data}")
 
-        # Bulk insert everything at once
-        print(f"[CRAWL {job_id}] Bulk inserting {len(all_page_docs)} pages, {len(all_parent_docs)} parents, {len(all_chunk_docs)} chunks")
-        try:
-            await db.pages.insert_many(all_page_docs, ordered=False)
-            await db.parents.insert_many(all_parent_docs, ordered=False)
-            for start in range(0, len(all_chunk_docs), EMBEDDING_BATCH_SIZE):
-                await db.chunks.insert_many(all_chunk_docs[start:start + EMBEDDING_BATCH_SIZE], ordered=False)
-        except Exception as e:
-            print(f"[CRAWL {job_id}] Bulk insert failed: {e}")
-            await db.pages.delete_many({"tenant_id": tenant_id, "crawl_id": job_id})
-            await db.parents.delete_many({"tenant_id": tenant_id, "crawl_id": job_id})
-            await db.chunks.delete_many({"tenant_id": tenant_id, "crawl_id": job_id})
-            await _fail_job(job_id, f"Bulk insert failed: {e}")
-            return
-
-        # Verify job is still active before final done status update
-        current_job = await db.crawl_jobs.find_one({"job_id": job_id}, {"status": 1})
-        if not current_job or current_job.get("status") in ("failed", "purged"):
-            print(f"[CRAWL {job_id}] Job was cancelled or deleted during processing, aborting finalize")
-            await db.pages.delete_many({"tenant_id": tenant_id, "crawl_id": job_id})
-            await db.parents.delete_many({"tenant_id": tenant_id, "crawl_id": job_id})
-            await db.chunks.delete_many({"tenant_id": tenant_id, "crawl_id": job_id})
-            return
-
-        # Finalize
-        pages_found = len(all_page_docs)
-        chunks_created = len(all_chunk_docs)
-        print(f"[CRAWL {job_id}] Done. pages={pages_found}, chunks={chunks_created}, errors={embedding_errors}")
-
-        await db.crawl_jobs.update_one(
-            {"job_id": job_id},
-            {"$set": {
-                "status": "done", "pages_found": pages_found,
-                "chunks_created": chunks_created, "embedding_errors": embedding_errors,
-                "error": None, "finished_at": datetime.now(timezone.utc),
-            }}
-        )
-        await db.source_jobs.update_one(
-            {"job_id": job_id},
-            {"$set": {
-                "status": "done", "pages_found": pages_found,
-                "chunks_created": chunks_created, "error": None, "finished_at": datetime.now(timezone.utc),
-            }}
-        )
-
-        if pages_found > 0:
-            asyncio.create_task(generate_suggested_questions(tenant_id))
-            asyncio.create_task(_generate_business_description(tenant_id, job_id))
-    except Exception as e:
-        print(f"[CRAWL {job_id}] Processing failed with exception: {e}")
-        await _fail_job(job_id, f"Processing failed: {e}")
+        raise RuntimeError(f"Firecrawl crawl timed out after {max_wait}s")
 
 
-async def _fail_job(job_id: str, error: str):
-    job = await db.crawl_jobs.find_one({"job_id": job_id}, {"status": 1})
-    if job and job.get("status") in ("failed", "purged"):
-        print(f"[CRAWL {job_id}] Job already status '{job['status']}', skipping _fail_job")
-        return
-    await db.crawl_jobs.update_one(
-        {"job_id": job_id},
-        {"$set": {
-            "status": "failed",
-            "error": error,
-            "finished_at": datetime.now(timezone.utc)
-        }}
+async def _index_page(
+    tenant_id: str,
+    crawl_id: str,
+    page: dict,
+    source_id: str = "",
+) -> dict | None:
+    content = page.get("markdown", "").strip()
+    url = page.get("metadata", {}).get("sourceURL", "")
+    title = page.get("metadata", {}).get("title", "")
+
+    if not content or len(content) < 50 or not url:
+        print(f"[INDEX] Skipping page url={url} content_len={len(content)} reason={'empty' if not content else 'too short' if len(content) < 50 else 'no url'}")
+        return None
+
+    doc_id = str(uuid.uuid4())
+    result = await ingest_document(
+        tenant_id=tenant_id,
+        source_id=source_id,
+        doc_id=doc_id,
+        content=content,
+        title=title,
+        url=url,
+        crawl_id=crawl_id,
     )
-    await db.source_jobs.update_one(
-        {"job_id": job_id},
-        {"$set": {
-            "status": "failed",
-            "error": error,
-            "finished_at": datetime.now(timezone.utc)
-        }}
-    )
+
+    if result["indexed"]:
+        return {
+            "url": url,
+            "indexed": True,
+            "chunks_created": result["chunks_created"],
+            "embedding_errors": result["embedding_errors"],
+        }
+
+    return {
+        "url": url,
+        "indexed": False,
+        "chunks_created": 0,
+        "embedding_errors": result["embedding_errors"] or 1,
+    }
 
 
 async def _generate_business_description(tenant_id: str, crawl_id: str):
@@ -399,7 +284,7 @@ async def _generate_business_description(tenant_id: str, crawl_id: str):
             max_tokens=100,
             temperature=0.0,
         )
-        description = (resp.choices[0].message.content or "").strip()
+        description = resp.choices[0].message.content.strip()
 
         await db.tenants.update_one(
             {"tenant_id": tenant_id},
