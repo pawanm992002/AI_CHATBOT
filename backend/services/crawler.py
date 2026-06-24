@@ -36,7 +36,6 @@ async def crawl_task(tenant_id: str, seed_url: str, job_id: str, source_id: str 
                 "started_at": datetime.now(timezone.utc),
                 "embedding_errors": 0,
                 "error": None,
-                "cached_pages": [],
             }}
         )
         await db.source_jobs.update_one(
@@ -118,7 +117,7 @@ async def _start_firecrawl_job(seed_url: str, metadata: dict = None) -> Optional
         payload["webhook"] = {
             "url": f"{settings.PUBLIC_URL}/webhook/firecrawl",
             "metadata": metadata or {},
-            "events": ["completed", "failed", "page"],
+            "events": ["completed", "failed"],
         }
         print(f"[FIRECRAWL] Webhook configured: {settings.PUBLIC_URL}/webhook/firecrawl")
 
@@ -137,22 +136,21 @@ async def _start_firecrawl_job(seed_url: str, metadata: dict = None) -> Optional
 
 
 
-async def _process_crawled_pages(
+async def _fetch_and_process_crawled_pages(
+    firecrawl_job_id: str,
     tenant_id: str,
     job_id: str,
-    pages: list[dict],
     source_id: str = "",
     seed_url: str = "",
 ):
-    """Process crawled pages. Simple approach: process all, no staging."""
+    """Fetch all scraped pages from Firecrawl's API and process them."""
     try:
         job = await db.crawl_jobs.find_one({"job_id": job_id})
         if job and job.get("status") == "done":
             print(f"[CRAWL {job_id}] Already done, skipping")
             return
         if job and job.get("status") in ("failed", "purged"):
-            status_str = job.get("status")
-            print(f"[CRAWL {job_id}] Job status is '{status_str}', skipping processing")
+            print(f"[CRAWL {job_id}] Job status is '{job['status']}', skipping processing")
             return
 
         # Check if bulk insert already completed (crash after insert, before finalize)
@@ -167,6 +165,27 @@ async def _process_crawled_pages(
                 {"job_id": job_id},
                 {"$set": {"status": "done", "pages_found": existing_count, "error": None, "finished_at": datetime.now(timezone.utc)}}
             )
+            return
+
+        # Fetch all pages from Firecrawl API
+        headers = {"Authorization": f"Bearer {settings.FIRECRAWL_API_KEY}"}
+        pages = []
+        page_data = None
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
+            url = f"https://api.firecrawl.dev/v2/crawl/{firecrawl_job_id}"
+            while url:
+                resp = await client.get(url, headers=headers)
+                if resp.status_code != 200:
+                    print(f"[CRAWL {job_id}] Firecrawl API returned {resp.status_code}")
+                    await _fail_job(job_id, f"Failed to fetch crawl results: HTTP {resp.status_code}")
+                    return
+                page_data = resp.json()
+                pages.extend(page_data.get("data", []))
+                url = page_data.get("next")
+        print(f"[CRAWL {job_id}] Fetched {len(pages)} pages from Firecrawl API")
+
+        if not pages:
+            await _fail_job(job_id, "Crawl completed but no pages returned from Firecrawl")
             return
 
         from services.ingestion import (
@@ -307,8 +326,7 @@ async def _process_crawled_pages(
                 "status": "done", "pages_found": pages_found,
                 "chunks_created": chunks_created, "embedding_errors": embedding_errors,
                 "error": None, "finished_at": datetime.now(timezone.utc),
-            },
-            "$unset": {"cached_pages": ""}}
+            }}
         )
         await db.source_jobs.update_one(
             {"job_id": job_id},

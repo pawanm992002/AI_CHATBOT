@@ -57,7 +57,7 @@ COLLECTION_SCHEMAS = {
                     "tenant_id": {"bsonType": "string"},
                     "job_id": {"bsonType": "string"},
                     "seed_url": {"bsonType": "string"},
-                    "status": {"enum": ["queued", "running", "processing", "done", "failed", "purged"]},
+                    "status": {"enum": ["queued", "running", "done", "failed", "purged"]},
                     "pages_found": {"bsonType": "int"},
                     "chunks_created": {"bsonType": "int"},
                     "embedding_errors": {"bsonType": "int"},

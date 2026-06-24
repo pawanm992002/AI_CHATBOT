@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, Request
 from models.requests import CrawlRequest
 from views.responses import CrawlJobResponse
 from core.auth import verify_api_key, get_current_tenant, db
-from services.crawler import crawl_task, normalize_url, _process_crawled_pages, _fail_job
+from services.crawler import crawl_task, normalize_url, _fetch_and_process_crawled_pages, _fail_job
 from repositories.crawl_job_repository import CrawlJobRepository
 from datetime import datetime, timezone
 from core.config import settings
@@ -105,7 +105,7 @@ async def _cancel_job(job_id: str, tenant_id: str) -> dict:
     job = await db.crawl_jobs.find_one({"tenant_id": tenant_id, "job_id": job_id})
     if not job:
         raise HTTPException(status_code=404, detail="Crawl job not found")
-    if job.get("status") not in ("queued", "running", "processing"):
+    if job.get("status") not in ("queued", "running"):
         raise HTTPException(status_code=400, detail=f"Cannot cancel job with status '{job['status']}'")
 
     firecrawl_job_id = job.get("firecrawl_job_id")
@@ -208,48 +208,20 @@ async def firecrawl_webhook(request: Request):
     if not job_id:
         return {"status": "ignored"}
 
-    # crawl.page — accumulate pages as they come in
-    if event_type == "crawl.page":
-        job = await db.crawl_jobs.find_one({"job_id": job_id}, {"status": 1})
+    # crawl.completed — all pages scraped, now fetch and process
+    if event_type == "crawl.completed":
+        job = await db.crawl_jobs.find_one({"job_id": job_id}, {"status": 1, "firecrawl_job_id": 1})
         if not job or job.get("status") in ("failed", "purged"):
-            status_str = job.get("status") if job else "None"
-            print(f"[WEBHOOK] Job {job_id} is in status '{status_str}', ignoring crawl.page")
+            print(f"[WEBHOOK] Job {job_id} is in status '{job.get('status') if job else 'None'}', ignoring crawl.completed")
             return {"status": "ignored"}
-        pages = body.get("data", [])
-        if pages:
-            try:
-                await db.crawl_jobs.update_one(
-                    {"job_id": job_id},
-                    {"$push": {"cached_pages": {"$each": pages}}}
-                )
-                print(f"[WEBHOOK] Cached {len(pages)} pages for job {job_id}")
-            except Exception as e:
-                print(f"[WEBHOOK] WARNING: Failed to cache {len(pages)} page(s) for job {job_id}: {e}")
-
-    # crawl.completed — all pages scraped, now process
-    elif event_type == "crawl.completed":
-        job = await db.crawl_jobs.find_one({"job_id": job_id}, {"status": 1})
-        if not job or job.get("status") in ("failed", "purged"):
-            status_str = job.get("status") if job else "None"
-            print(f"[WEBHOOK] Job {job_id} is in status '{status_str}', ignoring crawl.completed")
-            return {"status": "ignored"}
-        cached = await db.crawl_jobs.find_one(
-            {"job_id": job_id},
-            {"cached_pages": 1}
+        firecrawl_job_id = job.get("firecrawl_job_id")
+        if not firecrawl_job_id:
+            await _fail_job(job_id, "Crawl completed but no Firecrawl job ID found")
+            return {"status": "ok"}
+        print(f"[WEBHOOK] Crawl completed for job {job_id}, fetching results from Firecrawl API")
+        asyncio.create_task(
+            _fetch_and_process_crawled_pages(firecrawl_job_id, tenant_id, job_id, source_id, seed_url)
         )
-        all_pages = cached.get("cached_pages", []) if cached else []
-        print(f"[WEBHOOK] Crawl completed for job {job_id} with {len(all_pages)} pages")
-
-        if all_pages:
-            await db.crawl_jobs.update_one(
-                {"job_id": job_id},
-                {"$set": {"status": "processing", "pages_found": len(all_pages), "error": None}}
-            )
-            asyncio.create_task(
-                _process_crawled_pages(tenant_id, job_id, all_pages, source_id, seed_url)
-            )
-        else:
-            await _fail_job(job_id, "Crawl completed but no pages were captured")
 
     # crawl failed
     elif event_type in ("crawl.failed",) or body.get("success") is False:
