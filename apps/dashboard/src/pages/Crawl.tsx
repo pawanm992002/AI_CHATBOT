@@ -41,6 +41,9 @@ const Crawl = () => {
         if (activeJob) {
           setJobId(activeJob.job_id);
           setJobStatus(activeJob);
+        } else {
+          setJobId(null);
+          setJobStatus(null);
         }
       }
     } catch (err) {
@@ -65,7 +68,7 @@ const Crawl = () => {
     try {
       const res = await privateAxios.post('/dashboard/crawl', { seed_url: seedUrl });
       setJobId(res.data.job_id);
-      setJobStatus(null);
+      setJobStatus({ job_id: res.data.job_id, seed_url: seedUrl, status: 'queued', pages_found: 0, chunks_created: 0, started_at: null });
       setSeedUrl('');
       setPage(1);
       fetchHistory(1);
@@ -101,13 +104,16 @@ const Crawl = () => {
         try {
           const res = await privateAxios.get(`/dashboard/crawl/${jobId}`);
           setJobStatus(res.data);
-          if (res.data.status === 'done' || res.data.status === 'failed') {
+          if (res.data && (res.data.status === 'done' || res.data.status === 'failed')) {
             clearInterval(interval);
             setPage(1);
             fetchHistory(1);
           }
-        } catch {
+        } catch (err: any) {
           clearInterval(interval);
+          setCrawlError(err.response?.data?.detail || 'Crawl job status not found');
+          setJobStatus(null);
+          setJobId(null);
         }
       }, 5000);
     }
@@ -196,7 +202,7 @@ const Crawl = () => {
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-bold text-white">Active Crawl Progress</h3>
             <div className="flex items-center gap-2">
-              {(jobStatus.status === 'running' || jobStatus.status === 'processing' || jobStatus.status === 'queued') && (
+              {(jobStatus.status === 'running' || jobStatus.status === 'processing' || jobStatus.status === 'queued') ? (
                 <button
                   onClick={() => handleCancel()}
                   disabled={isCancelling}
@@ -205,10 +211,20 @@ const Crawl = () => {
                   <XCircle size={14} />
                   {isCancelling ? 'Cancelling...' : 'Cancel'}
                 </button>
+              ) : (
+                <button
+                  onClick={() => {
+                    setJobId(null);
+                    setJobStatus(null);
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xxs font-bold uppercase bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 cursor-pointer transition-all"
+                >
+                  <span>Dismiss</span>
+                </button>
               )}
               <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xxs font-bold uppercase ${jobStatus.status === 'done'
                   ? 'bg-teal-950/40 text-teal-400 border border-teal-900/30'
-                  : jobStatus.status === 'failed'
+                  : jobStatus.status === 'failed' || jobStatus.status === 'purged'
                     ? 'bg-rose-950/40 text-rose-400 border border-rose-900/30'
                     : 'bg-amber-950/40 text-amber-400 border border-amber-900/30 animate-pulse'
                 }`}>

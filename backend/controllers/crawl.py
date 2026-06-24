@@ -1,13 +1,14 @@
 import httpx
-from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
+from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, Request
 from models.requests import CrawlRequest
 from views.responses import CrawlJobResponse
 from core.auth import verify_api_key, get_current_tenant, db
-from services.crawler import crawl_task, normalize_url
+from services.crawler import crawl_task, normalize_url, _process_crawled_pages, _fail_job
 from repositories.crawl_job_repository import CrawlJobRepository
 from datetime import datetime, timezone
 from core.config import settings
 import uuid
+import asyncio
 
 router = APIRouter(tags=["crawl"])
 crawl_job_repo = CrawlJobRepository()
@@ -47,7 +48,7 @@ async def start_crawl(req: CrawlRequest, background_tasks: BackgroundTasks, curr
         "pages_found": 0,
         "chunks_created": 0,
         "embedding_errors": 0,
-        "started_at": None,
+        "started_at": datetime.now(timezone.utc),
         "finished_at": None,
         "error": None,
     })
@@ -60,6 +61,8 @@ async def start_crawl(req: CrawlRequest, background_tasks: BackgroundTasks, curr
 @router.get("/crawl/{job_id}")
 async def get_crawl_status(job_id: str, current_tenant: dict = Depends(verify_api_key)):
     job = await crawl_job_repo.get_by_job_id(current_tenant["tenant_id"], job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Crawl job not found")
     return job
 
 
@@ -89,7 +92,7 @@ async def dashboard_start_crawl(req: CrawlRequest, background_tasks: BackgroundT
         "pages_found": 0,
         "chunks_created": 0,
         "embedding_errors": 0,
-        "started_at": None,
+        "started_at": datetime.now(timezone.utc),
         "finished_at": None,
         "error": None,
     })
@@ -173,6 +176,8 @@ async def dashboard_crawl_history(
 @router.get("/dashboard/crawl/{job_id}")
 async def dashboard_get_crawl_status(job_id: str, current_tenant: dict = Depends(get_current_tenant)):
     job = await crawl_job_repo.get_by_job_id(current_tenant["tenant_id"], job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Crawl job not found")
     return _serialize_job(job)
 
 
@@ -183,3 +188,78 @@ async def dashboard_delete_index(current_tenant: dict = Depends(get_current_tena
     await db.parents.delete_many({"tenant_id": tenant_id})
     await db.pages.delete_many({"tenant_id": tenant_id})
     return {"status": "deleted"}
+
+
+# ── Firecrawl Webhook ──────────────────────────────────────────────────────
+
+@router.post("/webhook/firecrawl")
+async def firecrawl_webhook(request: Request):
+    """Handle Firecrawl webhook callbacks for crawl completion."""
+    body = await request.json()
+    event_type = body.get("type")
+    metadata = body.get("metadata", {})
+    job_id = metadata.get("job_id")
+    tenant_id = metadata.get("tenant_id")
+    source_id = metadata.get("source_id", "")
+    seed_url = metadata.get("seed_url", "")
+
+    print(f"[WEBHOOK] type={event_type}, job_id={job_id}, success={body.get('success')}")
+
+    if not job_id:
+        return {"status": "ignored"}
+
+    # crawl.page — accumulate pages as they come in
+    if event_type == "crawl.page":
+        job = await db.crawl_jobs.find_one({"job_id": job_id}, {"status": 1})
+        if not job or job.get("status") in ("failed", "purged"):
+            status_str = job.get("status") if job else "None"
+            print(f"[WEBHOOK] Job {job_id} is in status '{status_str}', ignoring crawl.page")
+            return {"status": "ignored"}
+        pages = body.get("data", [])
+        if pages:
+            try:
+                await db.crawl_jobs.update_one(
+                    {"job_id": job_id},
+                    {"$push": {"cached_pages": {"$each": pages}}}
+                )
+                print(f"[WEBHOOK] Cached {len(pages)} pages for job {job_id}")
+            except Exception as e:
+                print(f"[WEBHOOK] WARNING: Failed to cache {len(pages)} page(s) for job {job_id}: {e}")
+
+    # crawl.completed — all pages scraped, now process
+    elif event_type == "crawl.completed":
+        job = await db.crawl_jobs.find_one({"job_id": job_id}, {"status": 1})
+        if not job or job.get("status") in ("failed", "purged"):
+            status_str = job.get("status") if job else "None"
+            print(f"[WEBHOOK] Job {job_id} is in status '{status_str}', ignoring crawl.completed")
+            return {"status": "ignored"}
+        cached = await db.crawl_jobs.find_one(
+            {"job_id": job_id},
+            {"cached_pages": 1}
+        )
+        all_pages = cached.get("cached_pages", []) if cached else []
+        print(f"[WEBHOOK] Crawl completed for job {job_id} with {len(all_pages)} pages")
+
+        if all_pages:
+            await db.crawl_jobs.update_one(
+                {"job_id": job_id},
+                {"$set": {"status": "processing", "pages_found": len(all_pages), "error": None}}
+            )
+            asyncio.create_task(
+                _process_crawled_pages(tenant_id, job_id, all_pages, source_id, seed_url)
+            )
+        else:
+            await _fail_job(job_id, "Crawl completed but no pages were captured")
+
+    # crawl failed
+    elif event_type in ("crawl.failed",) or body.get("success") is False:
+        job = await db.crawl_jobs.find_one({"job_id": job_id}, {"status": 1})
+        if not job or job.get("status") in ("failed", "purged"):
+            status_str = job.get("status") if job else "None"
+            print(f"[WEBHOOK] Job {job_id} is in status '{status_str}', ignoring crawl.failed")
+            return {"status": "ignored"}
+        error = body.get("error", "Crawl failed")
+        print(f"[WEBHOOK] Crawl failed for job {job_id}: {error}")
+        await _fail_job(job_id, error)
+
+    return {"status": "ok"}

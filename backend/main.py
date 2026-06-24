@@ -7,7 +7,7 @@ from core.config import settings
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from core.auth import db, limiter
-from services.crawler import start_crawl_monitor
+from services.crawler import crawl_task, _process_crawled_pages, _fail_job
 from fastapi.staticfiles import StaticFiles
 import os
 
@@ -91,33 +91,77 @@ async def cleanup_stale_jobs():
     import httpx
     from datetime import datetime, timezone
     from repositories.crawl_job_repository import CrawlJobRepository
-    from core.config import settings
     repo = CrawlJobRepository()
 
-    # Cancel any Firecrawl jobs that were running when server crashed
-    stale_jobs = await db.crawl_jobs.find(
-        {"status": {"$in": ["queued", "running"]}, "firecrawl_job_id": {"$exists": True, "$ne": None}},
-        {"_id": 1, "firecrawl_job_id": 1}
-    ).to_list(length=100)
-    for job in stale_jobs:
-        fc_id = job.get("firecrawl_job_id")
-        if fc_id:
-            try:
-                async with httpx.AsyncClient(timeout=15) as client:
-                    resp = await client.delete(
-                        f"https://api.firecrawl.dev/v2/crawl/{fc_id}",
-                        headers={"Authorization": f"Bearer {settings.FIRECRAWL_API_KEY}"},
-                    )
-                    print(f"Startup: cancelled Firecrawl job {fc_id} (HTTP {resp.status_code})")
-            except Exception as e:
-                print(f"Startup: failed to cancel Firecrawl job {fc_id}: {e}")
-
-    # Now fail all stale jobs in DB
+    # -- Jobs that never got a firecrawl_job_id (queued/running but not yet dispatched)
+    # These are safe to fail immediately — no Firecrawl job to worry about.
     modified = await repo.mark_stale_running_as_failed()
-    if modified or stale_jobs:
-        print(f"Cleaned up {len(stale_jobs)} Firecrawl job(s), {modified} DB job(s)")
+    if modified:
+        print(f"[STARTUP] Marked {modified} unstarted DB job(s) as failed")
 
-    # Fail source_jobs that have no corresponding active crawl
+    # -- Jobs that DO have a firecrawl_job_id: check their real status on Firecrawl
+    # before deciding what to do. Do NOT blindly DELETE — they may still be running.
+    stale_with_fc = await db.crawl_jobs.find(
+        {
+            "status": {"$in": ["queued", "running"]},
+            "firecrawl_job_id": {"$exists": True, "$ne": None},
+        },
+        {"job_id": 1, "firecrawl_job_id": 1, "tenant_id": 1, "source_id": 1, "seed_url": 1, "cached_pages": 1}
+    ).to_list(length=100)
+
+    for job in stale_with_fc:
+        fc_id = job["firecrawl_job_id"]
+        job_id = job["job_id"]
+        cached_pages = job.get("cached_pages", [])
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.get(
+                    f"https://api.firecrawl.dev/v2/crawl/{fc_id}",
+                    headers={"Authorization": f"Bearer {settings.FIRECRAWL_API_KEY}"},
+                )
+            fc_status = resp.json().get("status") if resp.status_code == 200 else None
+            print(f"[STARTUP] Firecrawl job {fc_id} → HTTP {resp.status_code}, status={fc_status}")
+        except Exception as e:
+            print(f"[STARTUP] Could not check Firecrawl job {fc_id}: {e}")
+            fc_status = None
+
+        if fc_status in ("completed", "failed", None):
+            # Firecrawl job is done or unreachable — process what we have or fail.
+            if fc_status == "completed" and cached_pages:
+                print(f"[STARTUP] Recovering {len(cached_pages)} cached pages for job {job_id}")
+                await db.crawl_jobs.update_one(
+                    {"job_id": job_id},
+                    {"$set": {"status": "processing", "pages_found": len(cached_pages), "error": None}}
+                )
+                asyncio.create_task(
+                    _process_crawled_pages(
+                        job["tenant_id"], job_id, cached_pages,
+                        job.get("source_id", ""), job.get("seed_url", "")
+                    )
+                )
+            elif cached_pages:
+                # Job failed on Firecrawl side but we have some pages — process them
+                print(f"[STARTUP] Firecrawl job {fc_id} failed/gone but {len(cached_pages)} pages cached — processing")
+                await db.crawl_jobs.update_one(
+                    {"job_id": job_id},
+                    {"$set": {"status": "processing", "pages_found": len(cached_pages), "error": None}}
+                )
+                asyncio.create_task(
+                    _process_crawled_pages(
+                        job["tenant_id"], job_id, cached_pages,
+                        job.get("source_id", ""), job.get("seed_url", "")
+                    )
+                )
+            else:
+                # No pages and Firecrawl is done/gone — just fail cleanly
+                await _fail_job(job_id, "Server restarted — crawl did not complete")
+                print(f"[STARTUP] Failed job {job_id} (no cached pages, Firecrawl status={fc_status})")
+        else:
+            # fc_status is "scraping" / "waiting" — crawl is still live on Firecrawl.
+            # Leave the DB record as-is; webhooks will complete it normally.
+            print(f"[STARTUP] Firecrawl job {fc_id} still active (status={fc_status}), leaving it running")
+
+    # -- Fail stale source_jobs that have no corresponding active crawl
     await db.source_jobs.update_many(
         {"status": {"$in": ["queued", "running", "processing"]}},
         {"$set": {"status": "failed", "error": "Server restarted", "finished_at": datetime.now(timezone.utc)}}
@@ -161,7 +205,3 @@ async def ensure_lookup_indexes():
     await db.knowledge_gaps.create_index([("tenant_id", 1), ("cluster_id", 1)])
     await db.source_jobs.create_index([("tenant_id", 1), ("source_id", 1), ("started_at", -1)])
     await db.source_jobs.create_index([("tenant_id", 1), ("job_type", 1)])
-
-@app.on_event("startup")
-async def start_crawl_monitor_task():
-    asyncio.create_task(start_crawl_monitor())
