@@ -1,17 +1,18 @@
 import os
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Traverse up from core/ to backend/
+# Traverse up from core/ to project root
 _dir = os.path.dirname(os.path.abspath(__file__))
 backend_dir = os.path.dirname(_dir)
+project_root = os.path.dirname(backend_dir)
 
 app_env = os.getenv("APP_ENV", "development").lower()
 if app_env == "production":
-    env_file_path = os.path.join(backend_dir, ".env.production")
+    env_file_path = os.path.join(project_root, ".env.production")
 elif app_env == "staging":
-    env_file_path = os.path.join(backend_dir, ".env.staging")
+    env_file_path = os.path.join(project_root, ".env.staging")
 else:
-    env_file_path = os.path.join(backend_dir, ".env")
+    env_file_path = os.path.join(project_root, ".env")
 
 class Settings(BaseSettings):
     MONGODB_URI: str = "mongodb://localhost:27017"

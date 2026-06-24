@@ -14,7 +14,7 @@ We support separate environments for staging and production:
 1. **Staging**: Connects to a staging database (e.g., `chatbot_db_staging`).
 2. **Production**: Connects to the main production database (e.g., `chatbot_db_production`).
 
-Each environment can load a custom `.env` file based on the `APP_ENV` environment variable (e.g., `APP_ENV=staging` loads `backend/.env.staging` and `APP_ENV=production` loads `backend/.env.production`).
+Each environment can load a custom `.env` file based on the `APP_ENV` environment variable (e.g., `APP_ENV=staging` loads `.env.staging` and `APP_ENV=production` loads `.env.production` from the project root).
 
 ---
 
