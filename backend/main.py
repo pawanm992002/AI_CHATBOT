@@ -88,13 +88,36 @@ async def apply_db_schemas():
 
 @app.on_event("startup")
 async def cleanup_stale_jobs():
+    import httpx
     from datetime import datetime, timezone
     from repositories.crawl_job_repository import CrawlJobRepository
+    from core.config import settings
     repo = CrawlJobRepository()
+
+    # Cancel any Firecrawl jobs that were running when server crashed
+    stale_jobs = await db.crawl_jobs.find(
+        {"status": {"$in": ["queued", "running"]}, "firecrawl_job_id": {"$exists": True, "$ne": None}},
+        {"_id": 1, "firecrawl_job_id": 1}
+    ).to_list(length=100)
+    for job in stale_jobs:
+        fc_id = job.get("firecrawl_job_id")
+        if fc_id:
+            try:
+                async with httpx.AsyncClient(timeout=15) as client:
+                    resp = await client.delete(
+                        f"https://api.firecrawl.dev/v2/crawl/{fc_id}",
+                        headers={"Authorization": f"Bearer {settings.FIRECRAWL_API_KEY}"},
+                    )
+                    print(f"Startup: cancelled Firecrawl job {fc_id} (HTTP {resp.status_code})")
+            except Exception as e:
+                print(f"Startup: failed to cancel Firecrawl job {fc_id}: {e}")
+
+    # Now fail all stale jobs in DB
     modified = await repo.mark_stale_running_as_failed()
-    if modified:
-        print(f"Cleaned up {modified} stale crawl job(s)")
-    # Also fail matching source_jobs for the failed crawl jobs
+    if modified or stale_jobs:
+        print(f"Cleaned up {len(stale_jobs)} Firecrawl job(s), {modified} DB job(s)")
+
+    # Fail source_jobs that have no corresponding active crawl
     await db.source_jobs.update_many(
         {"status": {"$in": ["queued", "running", "processing"]}},
         {"$set": {"status": "failed", "error": "Server restarted", "finished_at": datetime.now(timezone.utc)}}

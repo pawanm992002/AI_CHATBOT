@@ -1,10 +1,12 @@
-from fastapi import APIRouter, Depends, BackgroundTasks
+import httpx
+from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
 from models.requests import CrawlRequest
 from views.responses import CrawlJobResponse
 from core.auth import verify_api_key, get_current_tenant, db
 from services.crawler import crawl_task, normalize_url
 from repositories.crawl_job_repository import CrawlJobRepository
 from datetime import datetime, timezone
+from core.config import settings
 import uuid
 
 router = APIRouter(tags=["crawl"])
@@ -61,6 +63,11 @@ async def get_crawl_status(job_id: str, current_tenant: dict = Depends(verify_ap
     return job
 
 
+@router.delete("/crawl/{job_id}")
+async def cancel_crawl_job_api(job_id: str, current_tenant: dict = Depends(verify_api_key)):
+    return await _cancel_job(job_id, current_tenant["tenant_id"])
+
+
 @router.delete("/index")
 async def delete_index(current_tenant: dict = Depends(verify_api_key)):
     tenant_id = current_tenant["tenant_id"]
@@ -89,6 +96,50 @@ async def dashboard_start_crawl(req: CrawlRequest, background_tasks: BackgroundT
     await _create_crawl_source_job(current_tenant["tenant_id"], job_id, seed_url)
     background_tasks.add_task(crawl_task, current_tenant["tenant_id"], seed_url, job_id)
     return {"job_id": job_id}
+
+
+async def _cancel_job(job_id: str, tenant_id: str) -> dict:
+    job = await db.crawl_jobs.find_one({"tenant_id": tenant_id, "job_id": job_id})
+    if not job:
+        raise HTTPException(status_code=404, detail="Crawl job not found")
+    if job.get("status") not in ("queued", "running", "processing"):
+        raise HTTPException(status_code=400, detail=f"Cannot cancel job with status '{job['status']}'")
+
+    firecrawl_job_id = job.get("firecrawl_job_id")
+    if firecrawl_job_id:
+        headers = {"Authorization": f"Bearer {settings.FIRECRAWL_API_KEY}"}
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+            try:
+                await client.delete(
+                    f"https://api.firecrawl.dev/v2/crawl/{firecrawl_job_id}",
+                    headers=headers
+                )
+            except Exception as e:
+                print(f"[CRAWL] Job {job_id}: Failed to cancel Firecrawl job: {e}")
+
+    now = datetime.now(timezone.utc)
+    await db.crawl_jobs.update_one(
+        {"job_id": job_id},
+        {"$set": {
+            "status": "failed",
+            "error": "Cancelled by user",
+            "finished_at": now
+        }}
+    )
+    await db.source_jobs.update_one(
+        {"job_id": job_id},
+        {"$set": {
+            "status": "failed",
+            "error": "Cancelled by user",
+            "finished_at": now
+        }}
+    )
+    return {"status": "cancelled", "job_id": job_id}
+
+
+@router.delete("/dashboard/crawl/{job_id}")
+async def cancel_crawl_job(job_id: str, current_tenant: dict = Depends(get_current_tenant)):
+    return await _cancel_job(job_id, current_tenant["tenant_id"])
 
 
 def _serialize_job(job):
