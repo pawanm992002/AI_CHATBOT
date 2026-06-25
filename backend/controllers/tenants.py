@@ -95,6 +95,21 @@ async def update_description(description: str, current_tenant: dict = Depends(ge
     await tenant_repo.update(current_tenant["tenant_id"], {"description": description})
     return {"status": "ok", "description": description}
 
+@router.put("/info")
+async def update_business_info(
+    business_name: str | None = None,
+    email: str | None = None,
+    current_tenant: dict = Depends(get_current_tenant),
+):
+    updates = {}
+    if business_name is not None:
+        updates["business_name"] = business_name
+    if email is not None:
+        updates["email"] = email
+    if updates:
+        await tenant_repo.update(current_tenant["tenant_id"], updates)
+    return {"status": "ok", **updates}
+
 @router.put("/widget-settings")
 async def update_widget_settings(show_sources: bool, current_tenant: dict = Depends(get_current_tenant)):
     await tenant_repo.update(current_tenant["tenant_id"], {"show_sources": show_sources})
