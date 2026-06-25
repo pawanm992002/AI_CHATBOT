@@ -141,19 +141,20 @@ async def crawl_task(tenant_id: str, seed_url: str, job_id: str, source_id: str 
 
 
 async def _crawl_with_firecrawl(seed_url: str) -> list[dict]:
-    # Ensure URL has a protocol for Firecrawl
-    url = seed_url if seed_url.startswith(("http://", "https://")) else f"https://{seed_url}"
-
     headers = {"Authorization": f"Bearer {settings.FIRECRAWL_API_KEY}"}
     async with httpx.AsyncClient(timeout=httpx.Timeout(connect=60.0, read=120.0, write=60.0, pool=60.0)) as client:
+        print(f"[FIRECRAWL] Using MAX_CRAWL_PAGES={settings.MAX_CRAWL_PAGES} (APP_ENV={getattr(settings, 'APP_ENV', None)}) for seed_url={seed_url}")
         crawl_response = await client.post(
             "https://api.firecrawl.dev/v2/crawl",
             headers=headers,
             json={
-                "url": url,
+                "url": seed_url,
                 "limit": settings.MAX_CRAWL_PAGES,
                 "scrapeOptions": {
                     "formats": ["markdown"],
+                    "actions": [
+                        {"type": "wait", "milliseconds": 10000},
+                    ],
                 }
             }
         )

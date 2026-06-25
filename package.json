@@ -10,6 +10,7 @@
     "dev:backend": "uv run python -m uvicorn main:app --app-dir backend --reload",
     "dev": "concurrently --kill-others \"pnpm dev:backend\" \"pnpm dev:dashboard\" \"pnpm dev:widget\"",
     "start": "pnpm build && uv run python -m uvicorn main:app --app-dir backend --host 0.0.0.0 --port ${PORT:-8000}",
+    "killbackend": "lsof -ti:8000 | xargs -r kill -9 && echo 'Backend killed'",
     "clean": "rm -rf node_modules apps/*/node_modules packages/*/node_modules apps/*/dist packages/*/dist .venv backend/.venv && find . -type d -name \"__pycache__\" -exec rm -rf {} +"
   },
   "devDependencies": {
