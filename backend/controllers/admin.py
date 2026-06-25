@@ -35,15 +35,96 @@ async def admin_logout(response: Response, request: Request):
 async def admin_me(admin: dict = Depends(get_current_admin)):
     return {"username": admin["username"], "role": admin["role"]}
 
+import secrets
+import math
+from core.auth import hash_api_key
+
 @router.get("/tenants")
-async def get_all_tenants(admin: dict = Depends(get_current_admin)):
-    tenants_cursor = db.tenants.find({}, {"password_hash": 0})
-    tenants = await tenants_cursor.to_list(length=None)
+async def get_all_tenants(
+    page: int = 1,
+    limit: int = 10,
+    search: str = None,
+    status: str = None,
+    admin: dict = Depends(get_current_admin)
+):
+    query = {}
+    if status:
+        query["status"] = status
+    if search:
+        search_regex = {"$regex": search, "$options": "i"}
+        query["$or"] = [
+            {"business_name": search_regex},
+            {"email": search_regex},
+            {"domain": search_regex}
+        ]
+
+    total = await db.tenants.count_documents(query)
+    skip = (page - 1) * limit
+    tenants_cursor = db.tenants.find(query, {"password_hash": 0}).skip(skip).limit(limit)
+    tenants = await tenants_cursor.to_list(length=limit)
 
     for t in tenants:
         t["_id"] = str(t["_id"])
 
-    return tenants
+    total_pages = math.ceil(total / limit) if limit > 0 else 0
+
+    return {
+        "items": tenants,
+        "total": total,
+        "page": page,
+        "page_size": limit,
+        "total_pages": total_pages
+    }
+
+@router.post("/tenants/{tenant_id}/approve")
+async def approve_tenant(tenant_id: str, admin: dict = Depends(get_current_admin)):
+    tenant = await db.tenants.find_one({"tenant_id": tenant_id})
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    update_data = {"status": "approved"}
+    api_key = tenant.get("api_key", "")
+    if not api_key or api_key.startswith("pending_"):
+        new_api_key = f"sk_live_{secrets.token_urlsafe(32)}"
+        update_data["api_key"] = new_api_key
+        update_data["api_key_hash"] = hash_api_key(new_api_key)
+
+    await db.tenants.update_one({"tenant_id": tenant_id}, {"$set": update_data})
+    return {"message": "Tenant approved successfully", "api_key": update_data.get("api_key", api_key)}
+
+@router.post("/tenants/{tenant_id}/reject")
+async def reject_tenant(tenant_id: str, admin: dict = Depends(get_current_admin)):
+    tenant = await db.tenants.find_one({"tenant_id": tenant_id})
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    await db.tenants.update_one({"tenant_id": tenant_id}, {"$set": {"status": "rejected"}})
+    return {"message": "Tenant rejected successfully"}
+
+@router.post("/tenants/{tenant_id}/enable")
+async def enable_tenant(tenant_id: str, admin: dict = Depends(get_current_admin)):
+    tenant = await db.tenants.find_one({"tenant_id": tenant_id})
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    update_data = {"status": "approved"}
+    api_key = tenant.get("api_key", "")
+    if not api_key or api_key.startswith("pending_"):
+        new_api_key = f"sk_live_{secrets.token_urlsafe(32)}"
+        update_data["api_key"] = new_api_key
+        update_data["api_key_hash"] = hash_api_key(new_api_key)
+
+    await db.tenants.update_one({"tenant_id": tenant_id}, {"$set": update_data})
+    return {"message": "Tenant enabled successfully", "api_key": update_data.get("api_key", api_key)}
+
+@router.post("/tenants/{tenant_id}/disable")
+async def disable_tenant(tenant_id: str, admin: dict = Depends(get_current_admin)):
+    tenant = await db.tenants.find_one({"tenant_id": tenant_id})
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    await db.tenants.update_one({"tenant_id": tenant_id}, {"$set": {"status": "disabled"}})
+    return {"message": "Tenant disabled successfully"}
 
 @router.delete("/tenants/{tenant_id}")
 async def delete_tenant(tenant_id: str, admin: dict = Depends(get_current_admin)):

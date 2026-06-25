@@ -78,6 +78,16 @@ async def root():
 
 
 @app.on_event("startup")
+async def backfill_tenant_statuses():
+    result = await db.tenants.update_many(
+        {"status": {"$exists": False}},
+        {"$set": {"status": "approved"}}
+    )
+    if result.modified_count:
+        print(f"Backfilled status for {result.modified_count} existing tenant(s)")
+
+
+@app.on_event("startup")
 async def apply_db_schemas():
     from core.schema_validator import ensure_schemas
     await ensure_schemas()
@@ -130,3 +140,9 @@ async def ensure_lookup_indexes():
     await db.knowledge_gaps.create_index([("tenant_id", 1), ("cluster_id", 1)])
     await db.source_jobs.create_index([("tenant_id", 1), ("source_id", 1), ("started_at", -1)])
     await db.source_jobs.create_index([("tenant_id", 1), ("job_type", 1)])
+
+
+@app.on_event("shutdown")
+def shutdown_db_client():
+    from core.auth import client
+    client.close()

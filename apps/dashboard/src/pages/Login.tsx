@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { publicAxios } from '../utils/axios';
-import { Bot, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import { Bot, AlertCircle, Eye, EyeOff, CheckCircle } from 'lucide-react';
 
 const Login = () => {
   const [isRegister, setIsRegister] = useState(false);
@@ -11,6 +11,7 @@ const Login = () => {
   const [businessName, setBusinessName] = useState('');
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
@@ -21,6 +22,7 @@ const Login = () => {
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError('');
+    setSuccess('');
     setLoading(true);
     const endpoint = isRegister ? '/tenants/register' : '/tenants/login';
 
@@ -30,8 +32,18 @@ const Login = () => {
         payload.business_name = businessName;
         payload.email = email;
       }
-      await publicAxios.post(endpoint, payload);
-      navigate('/');
+      const response = await publicAxios.post(endpoint, payload);
+      
+      if (isRegister) {
+        setSuccess(response.data.message || 'Registration successful! Your account is pending administrator approval.');
+        setIsRegister(false);
+        setDomain('');
+        setPassword('');
+        setBusinessName('');
+        setEmail('');
+      } else {
+        navigate('/');
+      }
     } catch (err: any) {
       setError(err.response?.data?.detail || err.message || 'Authentication failed');
     } finally {
@@ -55,8 +67,15 @@ const Login = () => {
         </div>
 
         <div className="bg-slate-900 px-8 py-10 shadow-xl rounded-3xl border border-slate-800/80">
+          {success && (
+            <div className="mb-6 flex items-start gap-3 rounded-xl bg-emerald-950/20 p-4 text-sm text-emerald-350 border border-emerald-900/60 animate-fadeIn">
+              <CheckCircle size={18} className="mt-0.5 flex-shrink-0" />
+              <span>{success}</span>
+            </div>
+          )}
+
           {error && (
-            <div className="mb-6 flex items-start gap-3 rounded-xl bg-rose-950/20 p-4 text-sm text-rose-350 border border-rose-900/60">
+            <div className="mb-6 flex items-start gap-3 rounded-xl bg-rose-950/20 p-4 text-sm text-rose-350 border border-rose-900/60 animate-fadeIn">
               <AlertCircle size={18} className="mt-0.5 flex-shrink-0" />
               <span>{error}</span>
             </div>
@@ -150,6 +169,7 @@ const Login = () => {
               onClick={() => {
                 setIsRegister(!isRegister);
                 setError('');
+                setSuccess('');
               }}
               className="font-bold text-violet-400 hover:text-violet-300 hover:underline cursor-pointer"
             >

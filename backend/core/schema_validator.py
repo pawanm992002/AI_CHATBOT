@@ -6,7 +6,7 @@ COLLECTION_SCHEMAS = {
         "validator": {
             "$jsonSchema": {
                 "bsonType": "object",
-                "required": ["tenant_id", "api_key", "api_key_hash", "domain", "business_name", "email", "password_hash", "created_at"],
+                "required": ["tenant_id", "api_key", "api_key_hash", "domain", "business_name", "email", "password_hash", "created_at", "status"],
                 "properties": {
                     "tenant_id": {"bsonType": "string"},
                     "api_key": {"bsonType": "string"},
@@ -22,6 +22,7 @@ COLLECTION_SCHEMAS = {
                     "suggested_questions_auto": {"bsonType": "array", "items": {"bsonType": "string"}},
                     "show_sources": {"bsonType": "bool"},
                     "created_at": {"bsonType": "date"},
+                    "status": {"bsonType": "string"},
                 },
             }
         },

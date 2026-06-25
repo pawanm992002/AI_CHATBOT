@@ -1,6 +1,6 @@
 import os
 import string
-from fastapi import APIRouter, Depends, HTTPException, Response, Request
+from fastapi import APIRouter, Depends, HTTPException, Response, Request, status
 from fastapi.responses import HTMLResponse
 from models.requests import TenantRegisterRequest, TenantLoginRequest, SuggestedQuestionsUpdateRequest
 from views.responses import TokenResponse, TenantResponse
@@ -13,14 +13,14 @@ from datetime import datetime, timezone
 router = APIRouter(prefix="/tenants", tags=["tenants"])
 tenant_repo = TenantRepository()
 
-@router.post("/register", response_model=TokenResponse)
-async def register(tenant: TenantRegisterRequest, response: Response, request: Request):
+@router.post("/register")
+async def register(tenant: TenantRegisterRequest):
     existing = await tenant_repo.get_by_domain(tenant.domain)
     if existing:
         raise HTTPException(status_code=400, detail="Domain already registered")
 
     tenant_id = str(uuid.uuid4())
-    api_key = f"sk_live_{secrets.token_urlsafe(32)}"
+    api_key = f"pending_{secrets.token_urlsafe(32)}"
 
     tenant_data = {
         "tenant_id": tenant_id,
@@ -36,19 +36,26 @@ async def register(tenant: TenantRegisterRequest, response: Response, request: R
         "suggested_questions_manual": [],
         "suggested_questions_auto": [],
         "show_sources": True,
-        "created_at": datetime.now(timezone.utc)
+        "created_at": datetime.now(timezone.utc),
+        "status": "pending"
     }
     await tenant_repo.create(tenant_data)
 
-    access_token = create_access_token(data={"sub": tenant_id, "role": "tenant"})
-    set_auth_cookie(response, access_token, request)
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {"message": "Registration successful! Your account is pending administrator approval."}
 
 @router.post("/login", response_model=TokenResponse)
 async def login(tenant: TenantLoginRequest, response: Response, request: Request):
     db_tenant = await tenant_repo.get_by_domain(tenant.domain)
     if not db_tenant or not verify_password(tenant.password, db_tenant["password_hash"]):
         raise HTTPException(status_code=400, detail="Incorrect domain or password")
+
+    status_val = db_tenant.get("status", "approved")
+    if status_val == "disabled":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tenant is disabled")
+    elif status_val == "pending":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Your registration is pending approval")
+    elif status_val == "rejected":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Your registration has been rejected")
 
     access_token = create_access_token(data={"sub": db_tenant["tenant_id"], "role": "tenant"})
     set_auth_cookie(response, access_token, request)
