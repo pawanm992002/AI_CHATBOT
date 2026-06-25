@@ -304,11 +304,11 @@ const KnowledgeImprovement = () => {
                     </span>
                     {gap.gap_type && (
                       <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xxs font-bold ${
-                        gap.gap_type === 'no_context' 
+                        gap.gap_type === 'no_context' || gap.gap_type === 'knowledge_gap'
                           ? 'bg-rose-950/30 text-rose-400 border border-rose-900/30' 
                           : 'bg-amber-950/30 text-amber-400 border border-amber-900/30'
                       }`}>
-                        {gap.gap_type === 'no_context' ? 'Knowledge Gap' : 'Out of Scope'}
+                        {gap.gap_type === 'no_context' || gap.gap_type === 'knowledge_gap' ? 'Knowledge Gap' : 'Out of Scope'}
                       </span>
                     )}
                   </div>
