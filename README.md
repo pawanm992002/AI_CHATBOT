@@ -56,10 +56,10 @@ sequenceDiagram
     
     API->>API: Merge & dedup (3 vector + 2 BM25)
     
-    alt Score > 0.75 (Good match)
+    alt Score > 0.5 (Good match)
         API->>GPT: RAG prompt with context
         GPT-->>API: Answer with citations
-    else Score ≤ 0.75 (No match)
+    else Score ≤ 0.5 (No match)
         Step 3: LLM Evaluate Reason
         API->>Classifier: Classify query type
         alt OUT_OF_SCOPE
@@ -132,7 +132,7 @@ flowchart TD
     VG --> Merge{Merge & Dedup}
     BG --> Merge
     
-    Merge -->|3 vector + 2 BM25| SC{Score > 0.75?}
+    Merge -->|3 vector + 2 BM25| SC{Score > 0.5?}
     
     SC -->|Yes| PA[Parent Context Assembly]
     SC -->|No| CL[gpt-4o-mini<br/>Classify Query]
@@ -166,20 +166,35 @@ Use `.env.production.example` as the template:
 cp .env.production.example .env
 ```
 
-Keep the `.env` file in the project root directory. The backend loads the `.env` file from the project root.
+Keep the `.env` file in the project root directory. The backend loads the `.env` file from the project root (priority: `.env.production` > `.env.staging` > `.env`).
 
 Update the values:
 ```bash
+# Required
 MONGODB_URI=mongodb+srv://<username>:<password>@cluster0.mongodb.net/?retryWrites=true&w=majority
 OPENAI_API_KEY=sk-proj-your-openai-api-key-here
 FIRECRAWL_API_KEY=fc-your-firecrawl-api-key-here
 JWT_SECRET=your-super-secret-jwt-key
-ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
-VITE_API_BASE_URL=http://localhost:8000
 REDIS_URI=redis://localhost:6379/0
-```
 
-`VITE_API_BASE_URL` is used when building the dashboard so browser requests and generated widget snippets point to the backend.
+# CORS & Auth
+ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+COOKIE_SECURE=False
+COOKIE_SAMESITE=lax
+ENFORCE_DOMAIN=False
+
+# Dashboard build config
+VITE_API_BASE_URL=http://localhost:8000
+
+# Optional
+APP_ENV=development
+MAX_CRAWL_PAGES=100
+PUBLIC_URL=
+
+# Admin credentials (defaults shown)
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=admin123
+```
 
 ## 2. MongoDB Atlas Indexes
 
@@ -225,10 +240,30 @@ Navigate to **Atlas Search** → **Create Search Index** → **Atlas Search**.
 }
 ```
 
-The backend also creates regular MongoDB lookup indexes on startup for parent-child retrieval:
-- `parents`: `tenant_id`, `parent_id`
-- `chunks`: `tenant_id`, `parent_id`, `child_index`
-- `pages`: `tenant_id`, `url`
+The backend creates MongoDB indexes on startup for efficient queries:
+
+| Collection | Index | Type |
+|---|---|---|
+| `parents` | `(tenant_id, parent_id)` | Compound |
+| `parents` | `(tenant_id, source_id)` | Compound |
+| `chunks` | `(tenant_id, parent_id, child_index)` | Compound |
+| `chunks` | `(tenant_id, source_id)` | Compound |
+| `pages` | `(tenant_id, url)` | Compound |
+| `pages` | `(tenant_id, source_id)` | Compound |
+| `visitors` | `session_id` | Single |
+| `tenants` | `tenant_id` | Unique |
+| `tenants` | `api_key` | Unique |
+| `tenants` | `domain` | Single |
+| `conversations` | `session_id` | Single |
+| `crawl_jobs` | `(job_id, tenant_id)` | Compound |
+| `sources` | `(tenant_id, source_id)` | Compound |
+| `faqs` | `(tenant_id, source_id, faq_id)` | Compound |
+| `documents` | `(tenant_id, source_id, doc_id)` | Compound |
+| `leads` | `(tenant_id, created_at DESC)` | Compound |
+| `knowledge_gaps` | `(tenant_id, status)` | Compound |
+| `knowledge_gaps` | `(tenant_id, cluster_id)` | Compound |
+| `source_jobs` | `(tenant_id, source_id, started_at DESC)` | Compound |
+| `source_jobs` | `(tenant_id, job_type)` | Compound |
 
 ## 3. Run the Platform
 
@@ -247,7 +282,7 @@ pnpm dev
 ```
 This will start:
 - FastAPI backend on `http://localhost:8000`
-- React Dashboard on `http://localhost:5173`
+- React Dashboard on `http://localhost:3000`
 - React Chat Widget dev server on `http://localhost:5174`
 
 If you prefer to run services manually, you can use:
@@ -256,7 +291,7 @@ If you prefer to run services manually, you can use:
 - **Run Widget:** `pnpm dev:widget`
 
 ## 4. Usage
-1. Open the Dashboard at `http://localhost:3000`.
+1. Open the Dashboard at `http://localhost:3000/dashboard/`.
 2. Register a new tenant.
 3. Go to Settings to copy your widget script tag.
 4. Go to Crawl Jobs and start a crawl of your website (e.g., `https://example.com`).
@@ -284,16 +319,16 @@ pnpm --filter widget dev
 **Terminal 3 — Open the test page:**
 ```bash
 # macOS
-open test-embed.html
+open backend/templates/test_page.html
 
 # Linux
-xdg-open test-embed.html
+xdg-open backend/templates/test_page.html
 
 # Windows
-start test-embed.html
+start backend/templates/test_page.html
 ```
 
-The test page (`test-embed.html`) simulates a real client website with:
+The test page (`backend/templates/test_page.html`) simulates a real client website with:
 - The widget loaded via a `<script>` tag (same production embed flow)
 - CSS variables (`--primary`, `--accent`) to test automatic theme inheritance
 - A **Toggle Dark Mode** button to verify dark/light mode detection
@@ -312,7 +347,7 @@ To test the production IIFE build instead of the Vite dev server:
 ```bash
 pnpm --filter widget build
 ```
-Then serve the `dist/` folder and update the `<script>` src in `test-embed.html` to point to the built file:
+Then serve the `dist/` folder and update the `<script>` src in `backend/templates/test_page.html` to point to the built file:
 ```html
 <script
   src="http://localhost:8080/widget.js"
@@ -528,7 +563,7 @@ sequenceDiagram
     Visitor->>Widget: Types "what are school timings"
     Widget->>API: POST /chat { query }
     
-    API->>API: Vector search returns no good match (score ≤ 0.75)
+    API->>API: Vector search returns no good match (score ≤ 0.5)
     
     API->>Classifier: Classify query type
     Note over Classifier: Uses business description<br/>for context
@@ -597,7 +632,7 @@ All endpoints require JWT authentication (`Authorization: Bearer <token>`).
 ### Technical Details
 - Similarity threshold: 0.85 (for gap deduplication)
 - FAQ suggestion threshold: 0.8 (returns top 3 matches)
-- Direct answer threshold: 0.75 (vector search score to return RAG answer)
+- Direct answer threshold: 0.5 (vector search score to return RAG answer)
 - Max gaps fetched for comparison: 1000
 - Embedding model: text-embedding-3-small (1536 dimensions)
 - Normalization: lowercase, remove punctuation, collapse whitespace (generic, no hardcoded words)
@@ -628,7 +663,7 @@ Visitor: "How much does this cost?"
 
 The chatbot avoids answering irrelevant questions through vector search scoring:
 
-1. **Vector search threshold**: If the top result score ≤ 0.75, the query is treated as "no match" and sent to the classifier.
+1. **Vector search threshold**: If the top result score ≤ 0.5, the query is treated as "no match" and sent to the classifier.
 2. **LLM classifier**: Classifies the query as `OUT_OF_SCOPE` (unrelated to business) or `KNOWLEDGE_GAP` (related but missing answer).
 3. **Hardened system prompt**: The RAG prompt instructs GPT — "If the context does not contain information relevant to the user's question, say you don't have that information."
 
@@ -657,10 +692,10 @@ To ensure high-performance, cost-effective conversational capability, the system
 - **Latency Optimization**: Reads bypass the database completely for active sessions, providing sub-millisecond context retrievals.
 
 ### 2. Semantic Context Summarization (Compaction)
-- **Trigger**: When the conversation history reaches 10 messages (5 complete turns).
-- **Pruning**: The last 4 messages (2 turns) are kept in full fidelity to handle immediate references (pronouns, follow-ups).
-- **Summarization**: The older 6 messages are aggregated with any existing summary into a new, consolidated rolling summary using `gpt-4o-mini`.
-- **Database Cap**: By trimming the active `messages` array down to 4 items and updating the document's `summary` field, MongoDB document size remains bounded at $O(1)$ size, avoiding unbounded array growth and slow updates.
+- **Trigger**: When the conversation history reaches 32 messages.
+- **Pruning**: The last 30 messages are kept in full fidelity to handle immediate references (pronouns, follow-ups).
+- **Summarization**: The older messages are aggregated with any existing summary into a new, consolidated rolling summary using `gpt-4o-mini`.
+- **Database Cap**: By trimming the active `messages` array down to 30 items and updating the document's `summary` field, MongoDB document size remains bounded at $O(1)$ size, avoiding unbounded array growth and slow updates.
 - **System Prompt Injection**: The rolling summary is automatically injected into the LLM system prompt on subsequent turns.
 
 ## Key Design Decisions
@@ -671,7 +706,7 @@ Greetings like "hi", "hello", "hey" are detected via regex (~10ms) without any L
 ### Vector Search Before Classification
 Instead of classifying queries first (which skipped knowledge base lookups for out-of-scope queries), the system now:
 1. Searches the knowledge base first
-2. Only classifies if no good match found (score ≤ 0.75)
+2. Only classifies if no good match found (score ≤ 0.5)
 
 This ensures answers from PDFs, FAQs, and crawled content are always found, even for queries that might be misclassified.
 
@@ -685,11 +720,81 @@ This ensures answers from PDFs, FAQs, and crawled content are always found, even
 ### Heading Prefix in Embeddings
 Section titles (e.g., *"Bus Tracking"*) are prepended to child chunk text before embedding (stored as `search_text`). The body text alone (*"Track school buses in real-time"*) misses the most descriptive keywords. The prefix is only used for embedding — the clean `text` field is served to GPT as context.
 
-### Direct Answer Threshold (0.75)
-Vector search scores above 0.75 return a RAG answer directly. Below 0.75, the query is sent to the LLM classifier to determine if it's out-of-scope or a knowledge gap.
+### Direct Answer Threshold (0.5)
+Vector search scores above 0.5 return a RAG answer directly. Below 0.5, the query is sent to the LLM classifier to determine if it's out-of-scope or a knowledge gap.
 
 ### Empty Context Guard
 If search returns zero results for a non-greeting query, the system classifies the query and returns an appropriate response — without calling GPT-4o for a RAG answer — preventing hallucination.
+
+## Authentication
+
+### Dashboard (Tenant/Admin)
+- JWT stored in HttpOnly cookie (`access_token`, 7-day expiry)
+- Cookie attributes: `HttpOnly=True`, `Secure` and `SameSite` configurable via env vars
+- Tenant endpoints use `get_current_tenant()` dependency (validates JWT + role)
+- Admin endpoints use `get_current_admin()` dependency (validates JWT + role: admin)
+
+### Widget
+- API key (`sk_live_*`) sent via `Authorization: Bearer` header
+- For WebSocket chat, API key is SHA-256 hashed and sent as `key_hash` query parameter
+- API key domain matching optionally enforced via `ENFORCE_DOMAIN=True`
+
+### Rate Limiting (3 Layers)
+| Layer | Scope | Limit | Mechanism |
+|---|---|---|---|
+| Per-IP | Client IP | 60 req/min | slowapi |
+| Per-tenant | API key | 100 req/min | In-memory deque |
+| Per-session | `chat_session_id` | 20 req/min | In-memory deque |
+
+## Admin Dashboard
+
+System admin panel for managing tenants across the platform.
+
+- **Login**: `POST /admin/login` with `ADMIN_USERNAME`/`ADMIN_PASSWORD` (defaults: admin/admin123)
+- **Tenant List**: `GET /admin/tenants` — shows domain, plan, creation date
+- **Delete Tenant**: `DELETE /admin/tenants/{tenant_id}` — cascading delete across all collections
+- **UI**: Separate sidebar with Shield icon, purple-themed login page
+
+Routes: `/admin/login`, `/admin/tenants` (protected by `AdminRoute` guard)
+
+## RBAC (Role-Based Access Control)
+
+Dashboard implements a 3-tier role system:
+
+| Role | Permissions |
+|---|---|
+| `admin` | Full access — create, edit, delete, rotate keys, manage tenants |
+| `editor` | Write access — create sources, add FAQs, edit content |
+| `viewer` | Read-only — view sources, gaps, leads |
+
+- Role fetched from `GET /tenants/me` and stored in global context
+- `hasAccess(role, action)` helper checks permissions
+- UI shows lock icons on disabled controls and RBAC error banners for unauthorized actions
+
+## Widget Features
+
+The embeddable chat widget (`apps/widget/`) is built as a self-executing IIFE bundle.
+
+### Embedding
+```html
+<script
+  src="https://your-domain.com/static/widget.js"
+  data-api-key="sk_live_..."
+  data-api-base-url="https://your-domain.com"
+></script>
+```
+
+### Capabilities
+- **WebSocket streaming** — Real-time token-by-token responses via `/ws/chat`
+- **Chat history persistence** — Stored in `sessionStorage` with 24-hour expiry
+- **Session management** — `chat_session_id` cookie for conversation continuity
+- **Enquiry form** — Inline lead capture when GPT detects purchase intent
+- **Like/dislike feedback** — Thumbs-up/down on every AI response
+- **Suggested questions** — Clickable chips shown on empty chat
+- **Source citations** — Toggleable per-tenant via `show_sources` setting
+- **Theme auto-detection** — Reads CSS variables (`--primary`, `--accent`) from host page
+- **Dark/light mode** — Auto-detects from host page attributes, classes, or background luminance
+- **Responsive** — Full-screen bottom sheet on mobile, floating panel on desktop
 
 ## Tech Stack
 
@@ -705,56 +810,113 @@ If search returns zero results for a non-greeting query, the system classifies t
 | Business Description | OpenAI `gpt-4o-mini` |
 | Suggested Questions | OpenAI `gpt-4o-mini` |
 | Crawling | Firecrawl API |
-| Auth | JWT (python-jose) + API keys (bcrypt) |
-| Frontend (Dashboard) | React 18, Vite |
-| Frontend (Widget) | React 18, Vite (embedded as script tag) |
+| Auth | JWT in HttpOnly cookies + API keys (bcrypt + SHA-256) |
+| Frontend (Dashboard) | React 18, Vite, TailwindCSS 4, react-router-dom, lucide-react |
+| Frontend (Widget) | React 18, Vite (IIFE bundle), react-markdown, TailwindCSS 4 |
+| Shared Types | `@chatbot/shared` workspace package |
 | Chunking | LangChain (MarkdownHeaderTextSplitter + RecursiveCharacterTextSplitter) |
+| PDF Parsing | PyMuPDF (fitz) |
 | Token Counting | tiktoken (`cl100k_base`) |
-| Rate Limiting | slowapi |
-| Containerization | Docker Compose |
+| Rate Limiting | slowapi (per-IP) + in-memory deque (per-tenant, per-session) |
+| Process Manager | PM2 |
+| Reverse Proxy | Nginx |
+| CI/CD | GitHub Actions (EC2 deployment) |
+| Package Manager | pnpm (monorepo), uv (Python) |
 
 ## API Endpoints
 
+### Widget & Chat
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
+| GET | `/widget/config` | API Key | Get widget config (theme + suggested questions) |
 | POST | `/chat` | API Key | Chat with the widget (returns `message_id`) |
 | POST | `/feedback` | API Key | Submit like/dislike feedback for a message |
-| GET | `/widget/config` | API Key | Get widget config (theme + suggested questions) |
+| WS | `/ws/chat?key_hash=...` | WebSocket + SHA-256 key hash | WebSocket streaming chat |
+
+### Tenant Auth & Profile
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
 | POST | `/tenants/register` | None | Register a new tenant |
-| POST | `/tenants/login` | None | Login |
+| POST | `/tenants/login` | None | Login (sets JWT cookie) |
+| POST | `/tenants/logout` | None | Clear auth cookie |
 | GET | `/tenants/me` | JWT | Get tenant info + suggested questions |
 | GET | `/tenants/stats` | JWT | Tenant stats |
 | POST | `/tenants/rotate-key` | JWT | Rotate API key |
 | PUT | `/tenants/suggested-questions` | JWT | Save manual suggested questions |
 | PUT | `/tenants/description` | JWT | Update business description |
-| GET | `/dashboard/analytics/feedback` | JWT | Get feedback analytics |
+| PUT | `/tenants/widget-settings` | JWT | Toggle widget `show_sources` setting |
+| GET | `/tenants/analytics/feedback` | JWT | Get feedback analytics (likes, dislikes, ratio) |
+| GET | `/tenants/test` | JWT | Serve HTML test page with widget pre-configured |
+
+### Crawl (Widget API Key)
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
 | POST | `/crawl` | API Key | Start a crawl job |
 | GET | `/crawl/{job_id}` | API Key | Check crawl status |
-| DELETE | `/index` | API Key | Delete indexed data |
+| DELETE | `/index` | API Key | Delete all indexed data for tenant |
+
+### Crawl (Dashboard JWT)
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
 | POST | `/dashboard/crawl` | JWT | Start a crawl (dashboard) |
-| GET | `/dashboard/crawl/{job_id}` | JWT | Check crawl status (dashboard) |
-| GET | `/dashboard/crawl/history` | JWT | Get crawl history with timestamps |
-| DELETE | `/dashboard/index` | JWT | Delete indexed data (dashboard) |
-| GET | `/dashboard/sources` | JWT | List all knowledge sources |
-| POST | `/dashboard/sources` | JWT | Create a source container |
+| GET | `/dashboard/crawl/history` | JWT | Paginated crawl job history |
+| GET | `/dashboard/crawl/{job_id}` | JWT | Get crawl job details |
+| GET | `/dashboard/crawl/{job_id}/urls` | JWT | Paginated list of URLs crawled in a job |
+| DELETE | `/dashboard/index` | JWT | Delete all indexed data (dashboard) |
+
+### Knowledge Sources
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| GET | `/dashboard/sources` | JWT | List all knowledge sources (with chunk counts) |
+| POST | `/dashboard/sources` | JWT | Create a source container (pdf/faq/text/website) |
+| GET | `/dashboard/sources/history` | JWT | Paginated source job history (all types) |
+| GET | `/dashboard/sources/history/{source_id}` | JWT | Paginated source job history for specific source |
 | GET | `/dashboard/sources/{source_id}` | JWT | Get source details + chunk count |
 | DELETE | `/dashboard/sources/{source_id}` | JWT | Delete source + indexed data |
+| DELETE | `/dashboard/sources/crawl/{job_id}` | JWT | Delete crawl source by job_id |
 | POST | `/dashboard/sources/pdf/upload` | JWT | Upload and index a PDF |
+
+### FAQs
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
 | GET | `/dashboard/sources/{source_id}/faqs` | JWT | List FAQs in a source |
 | POST | `/dashboard/sources/{source_id}/faqs` | JWT | Add a FAQ pair |
 | PUT | `/dashboard/sources/{source_id}/faqs/{faq_id}` | JWT | Update a FAQ |
 | DELETE | `/dashboard/sources/{source_id}/faqs/{faq_id}` | JWT | Delete a FAQ + its chunks |
-| POST | `/dashboard/sources/{source_id}/faqs/index` | JWT | Index all FAQs for search |
+| POST | `/dashboard/sources/{source_id}/faqs/index` | JWT | Re-index all FAQs for search |
+
+### Text Documents
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
 | GET | `/dashboard/sources/{source_id}/docs` | JWT | List text documents in a source |
 | POST | `/dashboard/sources/{source_id}/docs` | JWT | Create a text document |
 | PUT | `/dashboard/sources/{source_id}/docs/{doc_id}` | JWT | Update a text document |
 | DELETE | `/dashboard/sources/{source_id}/docs/{doc_id}` | JWT | Delete a text document + its chunks |
-| POST | `/dashboard/sources/{source_id}/docs/index` | JWT | Index all text documents for search |
+| POST | `/dashboard/sources/{source_id}/docs/index` | JWT | Re-index all text documents for search |
+
+### Knowledge Gaps
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
 | GET | `/dashboard/knowledge/gaps` | JWT | List knowledge gaps (filter: status, gap_type) |
 | GET | `/dashboard/knowledge/gaps/stats` | JWT | Get gap stats + top unanswered questions |
 | POST | `/dashboard/knowledge/gaps/{gap_id}/resolve` | JWT | Resolve a gap (create_faq, dismiss, or merge) |
 | POST | `/dashboard/knowledge/gaps/cluster` | JWT | Re-cluster open gaps by vector similarity |
 | POST | `/dashboard/knowledge/gaps/cleanup` | JWT | Merge duplicate gaps with normalized text |
+
+### Leads
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| POST | `/leads` | API Key | Submit lead/enquiry form |
+| GET | `/dashboard/leads` | JWT | List all leads for tenant |
+
+### System Admin
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| POST | `/admin/login` | None | Admin login (sets JWT cookie with role: admin) |
+| POST | `/admin/logout` | None | Clear admin auth cookie |
+| GET | `/admin/me` | JWT (admin) | Get admin info |
+| GET | `/admin/tenants` | JWT (admin) | List all tenants |
+| DELETE | `/admin/tenants/{tenant_id}` | JWT (admin) | Delete tenant + all associated data |
 
 ## Database Collections
 
@@ -766,6 +928,7 @@ If search returns zero results for a non-greeting query, the system classifies t
 | `chunks` | Child chunks with embeddings (searchable unit) |
 | `sources` | Knowledge source metadata |
 | `crawl_jobs` | Crawl job status and history |
+| `source_jobs` | Indexing job tracking (crawl, pdf_index, faq_index, text_index) |
 | `conversations` | Chat conversation history |
 | `visitors` | Visitor tracking (IP, page views, messages) |
 | `faqs` | FAQ Q&A pairs |
