@@ -199,9 +199,31 @@ async def _crawl_with_firecrawl(seed_url: str) -> list[dict]:
             print(f"[FIRECRAWL] Poll ({elapsed}s): status={status_data.get('status')}, total={status_data.get('total')}, completed={status_data.get('completed')}, failed={status_data.get('failed')}")
 
             if status_data["status"] == "completed":
-                data = status_data.get("data", [])
-                print(f"[FIRECRAWL] Completed with {len(data)} pages")
-                return data
+                all_data = status_data.get("data", [])
+                next_url = status_data.get("next")
+                print(f"[FIRECRAWL] Completed with {len(all_data)} pages (initial batch)")
+
+                # Follow pagination to get all remaining pages
+                while next_url:
+                    print(f"[FIRECRAWL] Fetching next batch from: {next_url[:100]}...")
+                    try:
+                        next_response = await client.get(next_url, headers=headers)
+                        if next_response.status_code == 429:
+                            print(f"[FIRECRAWL] Rate limited on pagination, waiting 10s...")
+                            await asyncio.sleep(10)
+                            next_response = await client.get(next_url, headers=headers)
+                        next_response.raise_for_status()
+                        next_data = next_response.json()
+                        batch = next_data.get("data", [])
+                        next_url = next_data.get("next")
+                        all_data.extend(batch)
+                        print(f"[FIRECRAWL] Fetched {len(batch)} more pages (total: {len(all_data)})")
+                    except Exception as e:
+                        print(f"[FIRECRAWL] Error fetching next batch: {e}")
+                        break
+
+                print(f"[FIRECRAWL] Total pages collected: {len(all_data)}")
+                return all_data
             if status_data["status"] == "failed":
                 print(f"[FIRECRAWL] Job failed: {status_data}")
                 raise RuntimeError(f"Firecrawl job failed: {status_data}")
