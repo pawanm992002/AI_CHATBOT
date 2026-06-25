@@ -140,76 +140,149 @@ async def crawl_task(tenant_id: str, seed_url: str, job_id: str, source_id: str 
         )
 
 
-async def _crawl_with_firecrawl(seed_url: str) -> list[dict]:
+async def _map_with_firecrawl(seed_url: str) -> list[str]:
+    """Discover all URLs from the sitemap using Firecrawl /map endpoint."""
     headers = {"Authorization": f"Bearer {settings.FIRECRAWL_API_KEY}"}
     async with httpx.AsyncClient(timeout=httpx.Timeout(connect=60.0, read=120.0, write=60.0, pool=60.0)) as client:
-        print(f"[FIRECRAWL] Using MAX_CRAWL_PAGES={settings.MAX_CRAWL_PAGES} (APP_ENV={getattr(settings, 'APP_ENV', None)}) for seed_url={seed_url}")
-        crawl_response = await client.post(
-            "https://api.firecrawl.dev/v2/crawl",
+        print(f"[FIRECRAWL] Discovering URLs from sitemap for {seed_url}")
+        map_response = await client.post(
+            "https://api.firecrawl.dev/v2/map",
             headers=headers,
             json={
                 "url": seed_url,
+                "sitemap": "only",
                 "limit": settings.MAX_CRAWL_PAGES,
-                "scrapeOptions": {
-                    "formats": ["markdown"],
-                    "actions": [
-                        {"type": "wait", "milliseconds": 10000},
-                    ],
-                }
+                "includeSubdomains": True,
+                "ignoreQueryParameters": True,
             }
         )
-        print(f"[FIRECRAWL] POST /v2/crawl status={crawl_response.status_code}")
-        print(f"[FIRECRAWL] Response: {crawl_response.text[:500]}")
-        if crawl_response.status_code == 402:
-            raise ValueError("Crawl service limit reached (out of credits). Please upgrade your plan or contact support.")
-        crawl_response.raise_for_status()
-        firecrawl_job_id = crawl_response.json()["id"]
-        print(f"[FIRECRAWL] Job ID: {firecrawl_job_id}")
+        print(f"[FIRECRAWL] POST /v2/map status={map_response.status_code}")
+        if map_response.status_code == 402:
+            raise ValueError("Map service limit reached (out of credits). Please upgrade your plan or contact support.")
+        map_response.raise_for_status()
+        map_data = map_response.json()
+        links = map_data.get("links", [])
+        print(f"[FIRECRAWL] Discovered {len(links)} URLs from sitemap")
 
-        # Timeout after 8 minutes
-        max_wait = 480
+        # Extract URLs - /map returns objects with "url" key or plain strings
+        raw_urls = []
+        for link in links:
+            if isinstance(link, dict):
+                raw_urls.append(link.get("url", ""))
+            else:
+                raw_urls.append(str(link))
+
+        # Convert relative URLs to absolute
+        from urllib.parse import urljoin
+        absolute_urls = []
+        base_url = seed_url if seed_url.startswith("http") else f"https://{seed_url}"
+        for url in raw_urls:
+            if not url:
+                continue
+            if url.startswith("http"):
+                absolute_urls.append(url)
+            else:
+                absolute_urls.append(urljoin(base_url + "/", url.lstrip("/")))
+        print(f"[FIRECRAWL] Converted to {len(absolute_urls)} absolute URLs")
+        return absolute_urls
+
+
+async def _batch_scrape_with_firecrawl(urls: list[str]) -> list[dict]:
+    """Scrape multiple URLs using Firecrawl /batch/scrape endpoint."""
+    headers = {"Authorization": f"Bearer {settings.FIRECRAWL_API_KEY}"}
+    async with httpx.AsyncClient(timeout=httpx.Timeout(connect=60.0, read=120.0, write=60.0, pool=60.0)) as client:
+        print(f"[FIRECRAWL] Starting batch scrape for {len(urls)} URLs")
+        batch_response = await client.post(
+            "https://api.firecrawl.dev/v2/batch/scrape",
+            headers=headers,
+            json={
+                "urls": urls,
+                "formats": ["markdown"],
+            }
+        )
+        print(f"[FIRECRAWL] POST /v2/batch/scrape status={batch_response.status_code}")
+        if batch_response.status_code != 200:
+            print(f"[FIRECRAWL] Batch scrape error: {batch_response.text[:500]}")
+        if batch_response.status_code == 402:
+            raise ValueError("Batch scrape limit reached (out of credits). Please upgrade your plan or contact support.")
+        if batch_response.status_code != 200:
+            print(f"[FIRECRAWL] Batch scrape error body: {batch_response.text[:1000]}")
+        batch_response.raise_for_status()
+        batch_job_id = batch_response.json()["id"]
+        print(f"[FIRECRAWL] Batch job ID: {batch_job_id}")
+
+        # Timeout after 10 minutes
+        max_wait = 600
         elapsed = 0
-
-        max_retries = 3
-        retry_delay = 10
 
         while elapsed < max_wait:
             await asyncio.sleep(5)
             elapsed += 5
             try:
                 status_response = await client.get(
-                    f"https://api.firecrawl.dev/v2/crawl/{firecrawl_job_id}",
+                    f"https://api.firecrawl.dev/v2/batch/scrape/{batch_job_id}",
                     headers=headers
                 )
             except (httpx.ConnectError, httpx.RemoteProtocolError) as e:
-                if max_retries > 0:
-                    max_retries -= 1
-                    print(f"[FIRECRAWL] Poll ({elapsed}s): Connection error ({e}), retrying in {retry_delay}s... (retries left: {max_retries})")
-                    await asyncio.sleep(retry_delay)
-                    elapsed += retry_delay
-                    continue
-                raise
-
-            if status_response.status_code == 429:
-                print(f"[FIRECRAWL] Poll ({elapsed}s): Rate limited, retrying in 10s...")
+                print(f"[FIRECRAWL] Batch poll ({elapsed}s): Connection error ({e}), retrying...")
                 await asyncio.sleep(10)
                 elapsed += 10
                 continue
-            if not status_response.text.strip():
-                print(f"[FIRECRAWL] Poll ({elapsed}s): Empty response, retrying in 5s...")
+
+            if status_response.status_code == 429:
+                print(f"[FIRECRAWL] Batch poll ({elapsed}s): Rate limited, retrying in 10s...")
+                await asyncio.sleep(10)
+                elapsed += 10
                 continue
+
             status_data = status_response.json()
-            print(f"[FIRECRAWL] Poll ({elapsed}s): status={status_data.get('status')}, total={status_data.get('total')}, completed={status_data.get('completed')}, failed={status_data.get('failed')}")
+            print(f"[FIRECRAWL] Batch poll ({elapsed}s): status={status_data.get('status')}, completed={status_data.get('completed')}/{status_data.get('total')}")
 
             if status_data["status"] == "completed":
-                data = status_data.get("data", [])
-                print(f"[FIRECRAWL] Completed with {len(data)} pages")
-                return data
-            if status_data["status"] == "failed":
-                print(f"[FIRECRAWL] Job failed: {status_data}")
-                raise RuntimeError(f"Firecrawl job failed: {status_data}")
+                all_data = status_data.get("data", [])
+                next_url = status_data.get("next")
+                print(f"[FIRECRAWL] Batch completed with {len(all_data)} pages (initial batch)")
 
-        raise RuntimeError(f"Firecrawl crawl timed out after {max_wait}s")
+                # Follow pagination
+                while next_url:
+                    print(f"[FIRECRAWL] Fetching next batch from: {next_url[:100]}...")
+                    try:
+                        next_response = await client.get(next_url, headers=headers)
+                        if next_response.status_code == 429:
+                            await asyncio.sleep(10)
+                            next_response = await client.get(next_url, headers=headers)
+                        next_response.raise_for_status()
+                        next_data = next_response.json()
+                        batch = next_data.get("data", [])
+                        next_url = next_data.get("next")
+                        all_data.extend(batch)
+                        print(f"[FIRECRAWL] Fetched {len(batch)} more pages (total: {len(all_data)})")
+                    except Exception as e:
+                        print(f"[FIRECRAWL] Error fetching next batch: {e}")
+                        break
+
+                print(f"[FIRECRAWL] Total pages collected: {len(all_data)}")
+                return all_data
+
+            if status_data["status"] == "failed":
+                print(f"[FIRECRAWL] Batch job failed: {status_data}")
+                raise RuntimeError(f"Firecrawl batch job failed: {status_data}")
+
+        raise RuntimeError(f"Firecrawl batch scrape timed out after {max_wait}s")
+
+
+async def _crawl_with_firecrawl(seed_url: str) -> list[dict]:
+    """Main crawl function: uses /map to discover URLs, then /batch/scrape to fetch content."""
+    # Step 1: Discover all URLs from sitemap
+    urls = await _map_with_firecrawl(seed_url)
+
+    if not urls:
+        print(f"[FIRECRAWL] No URLs found in sitemap for {seed_url}")
+        return []
+
+    # Step 2: Batch scrape all discovered URLs
+    pages = await _batch_scrape_with_firecrawl(urls)
+    return pages
 
 
 async def _index_page(

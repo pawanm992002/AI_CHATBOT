@@ -121,6 +121,35 @@ async def dashboard_get_crawl_status(job_id: str, current_tenant: dict = Depends
     return _serialize_job(job)
 
 
+@router.get("/dashboard/crawl/{job_id}/urls")
+async def dashboard_get_crawl_urls(
+    job_id: str,
+    page: int = 1,
+    page_size: int = 50,
+    current_tenant: dict = Depends(get_current_tenant),
+):
+    job = await crawl_job_repo.get_by_job_id(current_tenant["tenant_id"], job_id)
+    if not job:
+        return {"error": "Job not found"}
+
+    tenant_id = current_tenant["tenant_id"]
+    skip = (page - 1) * page_size
+
+    total = await db.pages.count_documents({"tenant_id": tenant_id, "crawl_id": job_id})
+    pages = await db.pages.find(
+        {"tenant_id": tenant_id, "crawl_id": job_id},
+        {"url": 1, "title": 1, "content_length": {"$strLenCP": "$content"}}
+    ).skip(skip).limit(page_size).to_list(length=page_size)
+
+    return {
+        "items": [{"url": p.get("url", ""), "title": p.get("title", "")} for p in pages],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": (total + page_size - 1) // page_size,
+    }
+
+
 @router.delete("/dashboard/index")
 async def dashboard_delete_index(current_tenant: dict = Depends(get_current_tenant)):
     tenant_id = current_tenant["tenant_id"]
