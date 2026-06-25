@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Palette } from '../utils/theme';
 
+//////
 interface EnquiryFormProps {
   accent: string;
   palette: Palette;
@@ -18,11 +19,11 @@ export function EnquiryForm({ accent, palette, onSubmit }: EnquiryFormProps) {
   const inputClass = "w-full px-3 py-2.25 mb-1.5 rounded-lg border outline-none text-[13px] box-border transition-colors duration-150";
 
   return (
-    <div 
+    <div
       className="mt-2.5 pt-2.5 animate-[cwSlideUp_0.2s_ease-out]"
       style={{ borderTop: `1px solid ${palette.divider}` }}
     >
-      <p 
+      <p
         className="m-0 mb-2 text-[12px] font-semibold"
         style={{ color: palette.subtleText }}
       >
