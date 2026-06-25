@@ -3,6 +3,7 @@ const path = require('path');
 module.exports = {
   apps: [
     // 1. Backend API Server (Serves the API and also serves the built dashboard/widget assets in production)
+    // pm2 startOrReload ecosystem.config.js --only ai-chatbot-backend --env production
     {
       name: "ai-chatbot-backend",
       script: path.join(__dirname, ".venv/bin/uvicorn"),
