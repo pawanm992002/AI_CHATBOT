@@ -163,7 +163,28 @@ async def _map_with_firecrawl(seed_url: str) -> list[str]:
         map_data = map_response.json()
         links = map_data.get("links", [])
         print(f"[FIRECRAWL] Discovered {len(links)} URLs from sitemap")
-        return links
+
+        # Extract URLs - /map returns objects with "url" key or plain strings
+        raw_urls = []
+        for link in links:
+            if isinstance(link, dict):
+                raw_urls.append(link.get("url", ""))
+            else:
+                raw_urls.append(str(link))
+
+        # Convert relative URLs to absolute
+        from urllib.parse import urljoin
+        absolute_urls = []
+        base_url = seed_url if seed_url.startswith("http") else f"https://{seed_url}"
+        for url in raw_urls:
+            if not url:
+                continue
+            if url.startswith("http"):
+                absolute_urls.append(url)
+            else:
+                absolute_urls.append(urljoin(base_url + "/", url.lstrip("/")))
+        print(f"[FIRECRAWL] Converted to {len(absolute_urls)} absolute URLs")
+        return absolute_urls
 
 
 async def _batch_scrape_with_firecrawl(urls: list[str]) -> list[dict]:
@@ -172,18 +193,20 @@ async def _batch_scrape_with_firecrawl(urls: list[str]) -> list[dict]:
     async with httpx.AsyncClient(timeout=httpx.Timeout(connect=60.0, read=120.0, write=60.0, pool=60.0)) as client:
         print(f"[FIRECRAWL] Starting batch scrape for {len(urls)} URLs")
         batch_response = await client.post(
-            "https://api.firecrawl.dev/v1/batch/scrape",
+            "https://api.firecrawl.dev/v2/batch/scrape",
             headers=headers,
             json={
                 "urls": urls,
-                "scrapeOptions": {
-                    "formats": ["markdown"],
-                }
+                "formats": ["markdown"],
             }
         )
-        print(f"[FIRECRAWL] POST /v1/batch/scrape status={batch_response.status_code}")
+        print(f"[FIRECRAWL] POST /v2/batch/scrape status={batch_response.status_code}")
+        if batch_response.status_code != 200:
+            print(f"[FIRECRAWL] Batch scrape error: {batch_response.text[:500]}")
         if batch_response.status_code == 402:
             raise ValueError("Batch scrape limit reached (out of credits). Please upgrade your plan or contact support.")
+        if batch_response.status_code != 200:
+            print(f"[FIRECRAWL] Batch scrape error body: {batch_response.text[:1000]}")
         batch_response.raise_for_status()
         batch_job_id = batch_response.json()["id"]
         print(f"[FIRECRAWL] Batch job ID: {batch_job_id}")
@@ -197,7 +220,7 @@ async def _batch_scrape_with_firecrawl(urls: list[str]) -> list[dict]:
             elapsed += 5
             try:
                 status_response = await client.get(
-                    f"https://api.firecrawl.dev/v1/batch/scrape/{batch_job_id}",
+                    f"https://api.firecrawl.dev/v2/batch/scrape/{batch_job_id}",
                     headers=headers
                 )
             except (httpx.ConnectError, httpx.RemoteProtocolError) as e:
