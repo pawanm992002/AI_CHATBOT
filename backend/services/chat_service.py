@@ -82,6 +82,8 @@ class ChatService:
             summary, messages = await self._compact_if_needed(summary, messages)
             await self._persist_conversation(turn, summary, messages)
             await self._track_visitor_message(turn.session_id)
+            if not show_form:
+                await self._log_knowledge_gap(tenant_id, turn.query, turn.current_url, "out_of_scope", turn.message_id)
             return ChatTurnResult(message_id=turn.message_id, answer=answer, sources=[], show_enquiry_form=show_form)
 
         search_query = turn.query
@@ -366,9 +368,9 @@ class ChatService:
             result = resp.choices[0].message.content.strip().upper()
             if "OUT_OF_SCOPE" in result:
                 return "out_of_scope"
-            return "knowledge_gap"
+            return "no_context"
         except Exception:
-            return "knowledge_gap"
+            return "no_context"
 
     async def _log_knowledge_gap(self, tenant_id: str, query: str, url: str, gap_type: str, message_id: str) -> None:
         try:

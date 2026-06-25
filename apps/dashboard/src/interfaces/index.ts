@@ -56,7 +56,7 @@ export interface Lead {
 export interface KnowledgeGap {
   gap_id: string;
   query: string;
-  gap_type?: 'no_context' | 'out_of_scope';
+  gap_type?: 'no_context' | 'out_of_scope' | 'knowledge_gap';
   count: number;
   status: 'open' | 'resolved' | 'dismissed';
   last_seen: string;
