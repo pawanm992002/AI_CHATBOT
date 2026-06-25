@@ -19,7 +19,7 @@ jobs:
           node-version: 22
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v3
+        uses: pnpm/action-setup@v4
         with:
           version: 9
 
@@ -38,10 +38,15 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
+          passphrase: ${{ secrets.EC2_SSH_PASSPHRASE }}
           script: |
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+            export PNPM_HOME="$HOME/.local/share/pnpm"
+            export PATH="$PNPM_HOME:$HOME/.local/bin:$PATH"
             cd ${{ secrets.APP_PATH }}
             git pull origin master
             pnpm install --frozen-lockfile
             pnpm build
             uv sync --frozen
-            pm2 startOrReload ecosystem.config.js --env production
+            pm2 startOrReload ecosystem.config.js --only ai-chatbot-backend --env production
