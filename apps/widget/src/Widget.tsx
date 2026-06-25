@@ -41,6 +41,7 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
   });
   const [isLoading, setIsLoading] = useState(false);
   const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([]);
+  const [showSources, setShowSources] = useState<boolean>(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -64,6 +65,9 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
       try {
         const config = await getWidgetConfig();
         if (config?.suggested_questions) setSuggestedQuestions(config.suggested_questions);
+        if (config && typeof config.show_sources === 'boolean') {
+          setShowSources(config.show_sources);
+        }
       } catch (err) {
         console.error("Failed to fetch widget config", err);
       }
@@ -418,6 +422,7 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
                 onSend={handleSend}
                 onFeedback={handleFeedback}
                 onEnquirySubmit={handleEnquirySubmit}
+                showSources={showSources}
               />
 
               <div ref={messagesEndRef} />

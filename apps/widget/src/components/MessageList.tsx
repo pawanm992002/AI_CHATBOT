@@ -14,6 +14,7 @@ interface MessageListProps {
   onSend: (text: string) => void;
   onFeedback: (msgIndex: number, rating: 'like' | 'dislike') => void;
   onEnquirySubmit: (msgIndex: number, formData: { name: string; email: string; phone: string }) => void;
+  showSources: boolean;
 }
 
 export function MessageList({
@@ -25,6 +26,7 @@ export function MessageList({
   onSend,
   onFeedback,
   onEnquirySubmit,
+  showSources,
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -39,7 +41,7 @@ export function MessageList({
   }, [messages]);
 
   return (
-    <div 
+    <div
       ref={scrollRef}
       className="flex-1 p-4 overflow-y-auto flex flex-col gap-2.5"
       style={{ backgroundColor: palette.msgAreaBg }}
@@ -47,7 +49,7 @@ export function MessageList({
       {/* Empty state — suggested questions */}
       {messages.length === 0 && suggestedQuestions.length > 0 && (
         <div className="my-auto">
-          <p 
+          <p
             className="text-center text-[12px] mb-2.5 font-semibold tracking-wider uppercase"
             style={{ color: palette.subtleText }}
           >
@@ -83,7 +85,7 @@ export function MessageList({
       {/* Empty state — no suggestions */}
       {messages.length === 0 && suggestedQuestions.length === 0 && (
         <div className="my-auto text-center px-5">
-          <div 
+          <div
             className="w-13 h-13 rounded-2xl flex items-center justify-center mx-auto mb-3.5"
             style={{ background: `${accent}15` }}
           >
@@ -91,7 +93,7 @@ export function MessageList({
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
             </svg>
           </div>
-          <p 
+          <p
             className="text-[14px] m-0 leading-relaxed"
             style={{ color: palette.subtleText }}
           >
@@ -109,7 +111,7 @@ export function MessageList({
             alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
           }}
         >
-          <div 
+          <div
             className="px-3.5 py-2.5 leading-relaxed text-[14px] break-words"
             style={{
               borderRadius: m.role === 'user'
@@ -135,55 +137,55 @@ export function MessageList({
               m.content
             ) : (
               <>
-              <ReactMarkdown
-                components={{
-                  a: ({ href, children }) => (
-                    <a
-                      href={href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline underline-offset-2"
-                      style={{ color: accent }}
-                    >
-                      {children}
-                    </a>
-                  ),
-                  strong: ({ children }) => (
-                    <strong className="font-semibold">{children}</strong>
-                  ),
-                  p: ({ children }) => (
-                    <p className="my-1 leading-relaxed">{children}</p>
-                  ),
-                  ul: ({ children }) => (
-                    <ul className="my-1 pl-5 list-disc">{children}</ul>
-                  ),
-                  ol: ({ children }) => (
-                    <ol className="my-1 pl-5 list-decimal">{children}</ol>
-                  ),
-                  li: ({ children }) => (
-                    <li className="my-0.5">{children}</li>
-                  ),
-                }}
-              >
-                {m.content}
-              </ReactMarkdown>
-              {m.isStreaming && (
-                <span
-                  className="inline-block w-[7px] h-[7px] ml-[3px] align-middle rounded-full"
-                  style={{
-                    backgroundColor: accent,
-                    animation: 'cwBreathe 1.4s ease-in-out infinite',
+                <ReactMarkdown
+                  components={{
+                    a: ({ href, children }) => (
+                      <a
+                        href={href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline underline-offset-2"
+                        style={{ color: accent }}
+                      >
+                        {children}
+                      </a>
+                    ),
+                    strong: ({ children }) => (
+                      <strong className="font-semibold">{children}</strong>
+                    ),
+                    p: ({ children }) => (
+                      <p className="my-1 leading-relaxed">{children}</p>
+                    ),
+                    ul: ({ children }) => (
+                      <ul className="my-1 pl-5 list-disc">{children}</ul>
+                    ),
+                    ol: ({ children }) => (
+                      <ol className="my-1 pl-5 list-decimal">{children}</ol>
+                    ),
+                    li: ({ children }) => (
+                      <li className="my-0.5">{children}</li>
+                    ),
                   }}
-                />
-              )}
+                >
+                  {m.content}
+                </ReactMarkdown>
+                {m.isStreaming && (
+                  <span
+                    className="inline-block w-[7px] h-[7px] ml-[3px] align-middle rounded-full"
+                    style={{
+                      backgroundColor: accent,
+                      animation: 'cwBreathe 1.4s ease-in-out infinite',
+                    }}
+                  />
+                )}
               </>
             )}
           </div>
 
           {/* Sources */}
-          {m.sources && m.sources.length > 0 && (
-            <div 
-              className="text-[11px] mt-1.5 flex flex-wrap gap-1"
+          {showSources && m.sources && m.sources.length > 0 && (
+            <div
+              className="text-[11px] mt-1.5 flex flex-wrap gap-1.5"
               style={{ color: palette.subtleText }}
             >
               {m.sources.map((s, idx) => {
@@ -193,11 +195,46 @@ export function MessageList({
                   <a
                     key={idx}
                     href={s.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     title={fullTitle}
-                    className="opacity-75 transition-opacity duration-150 hover:opacity-100"
-                    style={{ color: isDark ? '#fff' : accent }}
+                    className="inline-flex items-center px-2.5 py-1 rounded-full transition-all duration-150 hover:scale-102 hover:opacity-100 opacity-90 shadow-sm"
+                    style={{
+                      backgroundColor: isDark ? 'rgba(30, 41, 59, 0.75)' : '#f8fafc',
+                      color: isDark ? '#cbd5e1' : '#475569',
+                      border: `1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'}`,
+                      textDecoration: 'none',
+                      fontSize: '11px',
+                      fontWeight: 500,
+                      lineHeight: '1',
+                      whiteSpace: 'nowrap',
+                    }}
+                    onMouseEnter={e => {
+                      e.currentTarget.style.backgroundColor = isDark ? 'rgba(255,255,255,0.12)' : '#fff';
+                      e.currentTarget.style.borderColor = isDark ? 'rgba(255,255,255,0.2)' : `${accent}50`;
+                      e.currentTarget.style.color = isDark ? '#fff' : accent;
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.backgroundColor = isDark ? 'rgba(30, 41, 59, 0.75)' : '#f8fafc';
+                      e.currentTarget.style.borderColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
+                      e.currentTarget.style.color = isDark ? '#cbd5e1' : '#475569';
+                    }}
                   >
-                    [{idx + 1}] {label}
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: '4px', flexShrink: 0 }}>
+                      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                      <polyline points="15 3 21 3 21 9"></polyline>
+                      <line x1="10" y1="14" x2="21" y2="3"></line>
+                    </svg>
+                    <span style={{
+                      display: 'inline-block',
+                      verticalAlign: 'middle',
+                      maxWidth: '140px',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap'
+                    }}>
+                      {label}
+                    </span>
                   </a>
                 );
               })}

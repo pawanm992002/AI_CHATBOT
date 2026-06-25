@@ -4,6 +4,126 @@
   --color-brand-primary: #8b5cf6; /* violet-500 */
   --color-brand-secondary: #a78bfa; /* violet-400 */
   --color-brand-accent: #1e1b4b; /* dark indigo-950 */
+
+  --color-slate-50: var(--slate-50);
+  --color-slate-100: var(--slate-100);
+  --color-slate-200: var(--slate-200);
+  --color-slate-300: var(--slate-300);
+  --color-slate-400: var(--slate-400);
+  --color-slate-500: var(--slate-500);
+  --color-slate-600: var(--slate-600);
+  --color-slate-700: var(--slate-700);
+  --color-slate-800: var(--slate-800);
+  --color-slate-900: var(--slate-900);
+  --color-slate-950: var(--slate-950);
+
+  --color-violet-950: var(--violet-950);
+  --color-violet-900: var(--violet-900);
+  --color-violet-400: var(--violet-400);
+
+  --color-blue-950: var(--blue-950);
+  --color-blue-900: var(--blue-900);
+  --color-blue-400: var(--blue-400);
+
+  --color-indigo-950: var(--indigo-950);
+  --color-indigo-900: var(--indigo-900);
+  --color-indigo-400: var(--indigo-400);
+
+  --color-teal-950: var(--teal-950);
+  --color-teal-900: var(--teal-900);
+  --color-teal-400: var(--teal-400);
+
+  --color-rose-950: var(--rose-950);
+  --color-rose-900: var(--rose-900);
+  --color-rose-400: var(--rose-400);
+
+  --color-amber-950: var(--amber-950);
+  --color-amber-900: var(--amber-900);
+  --color-amber-300: var(--amber-300);
+}
+
+:root {
+  --slate-50: #f8fafc;
+  --slate-100: #f1f5f9;
+  --slate-200: #e2e8f0;
+  --slate-300: #cbd5e1;
+  --slate-400: #94a3b8;
+  --slate-500: #64748b;
+  --slate-600: #475569;
+  --slate-700: #334155;
+  --slate-800: #1e293b;
+  --slate-900: #0f172a;
+  --slate-950: #020617;
+
+  --violet-950: #2e1065;
+  --violet-900: #4c1d95;
+  --violet-400: #a78bfa;
+
+  --blue-950: #172554;
+  --blue-900: #1e3a8a;
+  --blue-400: #60a5fa;
+
+  --indigo-950: #1e1b4b;
+  --indigo-900: #312e81;
+  --indigo-400: #818cf8;
+
+  --teal-950: #042f2e;
+  --teal-900: #115e59;
+  --teal-400: #2dd4bf;
+
+  --rose-950: #450a0a;
+  --rose-900: #9f1239;
+  --rose-400: #fb7185;
+
+  --amber-950: #451a03;
+  --amber-900: #78350f;
+  --amber-300: #fcd34d;
+}
+
+.light {
+  --slate-955: #f8fafc;
+  --slate-950: #f8fafc;
+  --slate-900: #ffffff;
+  --slate-850: #f1f5f9;
+  --slate-800: #e2e8f0;
+  --slate-700: #cbd5e1;
+  --slate-600: #94a3b8;
+  --slate-500: #64748b;
+  --slate-400: #475569;
+  --slate-300: #334155;
+  --slate-200: #1e293b;
+  --slate-100: #0f172a;
+  --slate-50: #020617;
+
+  --violet-955: #f5f3ff;
+  --violet-950: #f5f3ff;
+  --violet-900: #ddd6fe;
+  --violet-400: #6d28d9;
+
+  --blue-955: #eff6ff;
+  --blue-950: #eff6ff;
+  --blue-900: #bfdbfe;
+  --blue-400: #1d4ed8;
+
+  --indigo-955: #e0e7ff;
+  --indigo-950: #e0e7ff;
+  --indigo-900: #c7d2fe;
+  --indigo-400: #4338ca;
+
+  --teal-955: #f0fdfa;
+  --teal-950: #f0fdfa;
+  --teal-900: #ccfbf1;
+  --teal-400: #0f766e;
+
+  --rose-955: #fff1f2;
+  --rose-950: #fff1f2;
+  --rose-900: #ffe4e6;
+  --rose-400: #be123c;
+
+  --amber-955: #fef3c7;
+  --amber-950: #fef3c7;
+  --amber-900: #fde68a;
+  --amber-300: #b45309;
 }
 
 /* Custom CSS utilities */
@@ -14,7 +134,31 @@
 }
 
 body {
-  @apply text-slate-200 antialiased bg-slate-950 font-sans;
+  @apply text-slate-200 antialiased bg-slate-950 font-sans transition-colors duration-300;
+}
+
+/* Light mode specific text overrides to keep elements readable */
+.light h1,
+.light h2,
+.light h3,
+.light h4,
+.light h5,
+.light h6,
+.light strong,
+.light label {
+  color: var(--slate-100) !important;
+}
+
+.light .text-white:not(button):not(a):not(button *):not(a *):not(.bg-violet-600 *):not(.bg-purple-600 *):not(.bg-teal-600 *):not(.bg-rose-600 *):not(.bg-amber-600 *):not(.bg-teal-700 *):not(.bg-purple-700 *):not(.bg-violet-700 *):not(.bg-rose-700 *):not(.bg-amber-700 *) {
+  color: var(--slate-100) !important;
+}
+
+/* Light mode sidebar active tab high-contrast styling */
+.light aside a.bg-violet-950\/40 {
+  background-color: var(--slate-850) !important;
+}
+.light aside a.border-violet-900\/40 {
+  border-color: var(--slate-800) !important;
 }
 
 /* Custom premium scrollbar */
@@ -23,12 +167,12 @@ body {
   height: 8px;
 }
 ::-webkit-scrollbar-track {
-  background: #0b0f19;
+  background: var(--slate-950);
 }
 ::-webkit-scrollbar-thumb {
-  background: #1e293b;
+  background: var(--slate-800);
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #334155;
+  background: var(--slate-700);
 }

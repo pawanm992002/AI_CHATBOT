@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Request, Response, HTTPException, WebSocket, WebSocketDisconnect, Query
 from models.requests import ChatRequest, FeedbackRequest
-from views.responses import ChatResponse, ChatSource
+from views.responses import ChatResponse, ChatSource, WidgetConfigResponse
 from core.auth import verify_api_key, db, limiter
 from core.config import settings
 from services.vector_search import search_chunks
@@ -17,7 +17,7 @@ from core.redis import redis_client
 
 router = APIRouter(tags=["chat"])
 
-@router.get("/widget/config")
+@router.get("/widget/config", response_model=WidgetConfigResponse)
 async def get_widget_config(current_tenant: dict = Depends(verify_api_key)):
     manual = current_tenant.get("suggested_questions_manual", [])
     auto = current_tenant.get("suggested_questions_auto", [])
@@ -25,6 +25,7 @@ async def get_widget_config(current_tenant: dict = Depends(verify_api_key)):
     return {
         "theme": current_tenant.get("theme", "default"),
         "suggested_questions": suggested,
+        "show_sources": current_tenant.get("show_sources", True),
     }
 
 # Max messages to send to GPT-4o (2 per turn)

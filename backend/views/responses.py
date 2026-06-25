@@ -47,6 +47,7 @@ class ChatResponse(BaseModel):
 class WidgetConfigResponse(BaseModel):
     theme: str
     suggested_questions: List[str]
+    show_sources: bool = True
 
 
 class FAQResponse(BaseModel):
@@ -98,6 +99,7 @@ class TenantResponse(BaseModel):
     api_key: Optional[str] = None
     suggested_questions_manual: List[str] = []
     suggested_questions_auto: List[str] = []
+    show_sources: bool = True
 
 
 class CrawlJobStatusResponse(BaseModel):

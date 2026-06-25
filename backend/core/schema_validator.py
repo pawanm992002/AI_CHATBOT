@@ -20,6 +20,7 @@ COLLECTION_SCHEMAS = {
                     "description": {"bsonType": ["string", "null"]},
                     "suggested_questions_manual": {"bsonType": "array", "items": {"bsonType": "string"}},
                     "suggested_questions_auto": {"bsonType": "array", "items": {"bsonType": "string"}},
+                    "show_sources": {"bsonType": "bool"},
                     "created_at": {"bsonType": "date"},
                 },
             }

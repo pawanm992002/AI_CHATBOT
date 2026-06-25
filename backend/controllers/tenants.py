@@ -35,6 +35,7 @@ async def register(tenant: TenantRegisterRequest, response: Response, request: R
         "password_hash": get_password_hash(tenant.password),
         "suggested_questions_manual": [],
         "suggested_questions_auto": [],
+        "show_sources": True,
         "created_at": datetime.now(timezone.utc)
     }
     await tenant_repo.create(tenant_data)
@@ -71,6 +72,7 @@ async def get_me(current_tenant: dict = Depends(get_current_tenant)):
         "api_key": current_tenant["api_key"],
         "suggested_questions_manual": current_tenant.get("suggested_questions_manual", []),
         "suggested_questions_auto": current_tenant.get("suggested_questions_auto", []),
+        "show_sources": current_tenant.get("show_sources", True),
         "created_at": current_tenant.get("created_at", datetime.now(timezone.utc)),
     }
 
@@ -85,6 +87,11 @@ async def rotate_key(current_tenant: dict = Depends(get_current_tenant)):
 async def update_description(description: str, current_tenant: dict = Depends(get_current_tenant)):
     await tenant_repo.update(current_tenant["tenant_id"], {"description": description})
     return {"status": "ok", "description": description}
+
+@router.put("/widget-settings")
+async def update_widget_settings(show_sources: bool, current_tenant: dict = Depends(get_current_tenant)):
+    await tenant_repo.update(current_tenant["tenant_id"], {"show_sources": show_sources})
+    return {"status": "ok", "show_sources": show_sources}
 
 @router.get("/stats")
 async def get_stats(current_tenant: dict = Depends(get_current_tenant)):

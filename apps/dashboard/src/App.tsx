@@ -20,7 +20,7 @@ import AdminLogin from './pages/AdminLogin';
 import AdminTenants from './pages/AdminTenants';
 
 // System Admin Layout Component
-import { Shield, Users, LogOut } from 'lucide-react';
+import { Shield, Users, LogOut, Sun, Moon } from 'lucide-react';
 
 const AuthSpinner = () => (
   <div className="flex h-screen items-center justify-center bg-slate-950">
@@ -60,6 +60,9 @@ const GuestRoute = ({ children }: { children: React.ReactNode }) => {
 
 const AdminLayout = ({ children }: { children: React.ReactNode }) => {
   const navigate = useNavigate();
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    return document.documentElement.classList.contains('light') ? 'light' : 'dark';
+  });
 
   React.useEffect(() => {
     document.title = "System Admin Dashboard";
@@ -72,6 +75,18 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
       // Cookie may already be cleared
     }
     navigate('/admin/login');
+  };
+
+  const toggleTheme = () => {
+    if (theme === 'light') {
+      document.documentElement.classList.remove('light');
+      localStorage.setItem('theme', 'dark');
+      setTheme('dark');
+    } else {
+      document.documentElement.classList.add('light');
+      localStorage.setItem('theme', 'light');
+      setTheme('light');
+    }
   };
 
   return (
@@ -113,6 +128,13 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
       <div className="flex-1 flex flex-col overflow-hidden">
         <header className="flex h-16 items-center justify-between border-b border-slate-800 bg-slate-900 px-8">
           <h1 className="text-xl font-bold text-white tracking-tight">System Admin Panel</h1>
+          <button
+            onClick={toggleTheme}
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 transition-all duration-200 cursor-pointer"
+            title={theme === 'light' ? 'Switch to Dark Mode' : 'Switch to Light Mode'}
+          >
+            {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
+          </button>
         </header>
         <main className="flex-1 overflow-y-auto p-8">
           <div className="mx-auto max-w-7xl animate-fadeIn">

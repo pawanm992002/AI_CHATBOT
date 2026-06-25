@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Menu, User, Bell } from 'lucide-react';
+import { Menu, User, Bell, Sun, Moon } from 'lucide-react';
 import { useStore } from '../store';
 
 interface TopbarProps {
@@ -9,6 +10,9 @@ interface TopbarProps {
 export const Topbar = ({ onMenuToggle }: TopbarProps) => {
   const location = useLocation();
   const { state } = useStore();
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    return document.documentElement.classList.contains('light') ? 'light' : 'dark';
+  });
 
   const getPageTitle = (pathname: string) => {
     if (pathname === '/') return 'Console Overview';
@@ -19,6 +23,18 @@ export const Topbar = ({ onMenuToggle }: TopbarProps) => {
     if (pathname.startsWith('/settings')) return 'Settings';
     if (pathname.startsWith('/admin')) return 'System Administration';
     return 'Dashboard';
+  };
+
+  const toggleTheme = () => {
+    if (theme === 'light') {
+      document.documentElement.classList.remove('light');
+      localStorage.setItem('theme', 'dark');
+      setTheme('dark');
+    } else {
+      document.documentElement.classList.add('light');
+      localStorage.setItem('theme', 'light');
+      setTheme('light');
+    }
   };
 
   return (
@@ -38,6 +54,13 @@ export const Topbar = ({ onMenuToggle }: TopbarProps) => {
 
       {/* Right side: Notifications & User profile */}
       <div className="flex items-center gap-3">
+        <button
+          onClick={toggleTheme}
+          className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 transition-all duration-200 cursor-pointer"
+          title={theme === 'light' ? 'Switch to Dark Mode' : 'Switch to Light Mode'}
+        >
+          {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
+        </button>
         <button className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 transition-colors cursor-pointer">
           <Bell size={18} />
         </button>

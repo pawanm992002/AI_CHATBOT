@@ -67,7 +67,7 @@ export const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
               <Bot size={22} className="animate-pulse" />
             </div>
             <div>
-              <span className="font-bold text-white text-lg leading-tight block">EduChat AI</span>
+              <span className="font-bold text-slate-100 text-lg leading-tight block">EduChat AI</span>
               <span className="text-xs text-slate-400 font-medium">Dashboard</span>
             </div>
           </Link>

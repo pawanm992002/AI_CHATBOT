@@ -6,7 +6,7 @@
     "build:dashboard": "pnpm --filter dashboard build",
     "build": "pnpm -r build",
     "dev:dashboard": "pnpm --filter dashboard dev",
-    "dev:widget": "pnpm --filter widget dev",
+    "dev:widget": "pnpm --filter widget build --watch",
     "dev:backend": "uv run python -m uvicorn main:app --app-dir backend --reload",
     "dev": "concurrently --kill-others \"pnpm dev:backend\" \"pnpm dev:dashboard\" \"pnpm dev:widget\"",
     "start": "pnpm build && uv run python -m uvicorn main:app --app-dir backend --host 0.0.0.0 --port ${PORT:-8000}",

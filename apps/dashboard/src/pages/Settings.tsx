@@ -16,6 +16,8 @@ const Settings = () => {
   const { rbacError, triggerRbacError } = useRbacError();
   const [description, setDescription] = useState('');
   const [savingDesc, setSavingDesc] = useState(false);
+  const [showSources, setShowSources] = useState(true);
+  const [savingSettings, setSavingSettings] = useState(false);
 
   const isEditor = hasAccess(state.role, 'write');
   const isAdmin = hasAccess(state.role, 'delete');
@@ -27,6 +29,7 @@ const Settings = () => {
       setManualQuestions(res.data.suggested_questions_manual || []);
       setAutoQuestions(res.data.suggested_questions_auto || []);
       setDescription(res.data.description || '');
+      setShowSources(res.data.show_sources !== false);
     } catch (err) {
       console.error(err);
     }
@@ -63,6 +66,24 @@ const Settings = () => {
       console.error(err);
     } finally {
       setSavingDesc(false);
+    }
+  };
+
+  const toggleSources = async () => {
+    if (!isEditor) {
+      triggerRbacError("You do not have Editor permissions to update widget settings.");
+      return;
+    }
+    setSavingSettings(true);
+    try {
+      const newValue = !showSources;
+      await privateAxios.put('/tenants/widget-settings', null, { params: { show_sources: newValue } });
+      setShowSources(newValue);
+      setMe((prev: any) => prev ? { ...prev, show_sources: newValue } : null);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSavingSettings(false);
     }
   };
 
@@ -220,6 +241,39 @@ const Settings = () => {
             <p className="text-xxs text-slate-500 font-semibold leading-relaxed truncate" title={testUrl}>
               {testUrl}
             </p>
+          </div>
+
+          {/* Widget Settings */}
+          <div className="bg-slate-900 p-6 rounded-3xl border border-slate-800/80 shadow-lg space-y-4">
+            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+              <Monitor size={18} className="text-violet-400" />
+              <span>Widget Configuration</span>
+            </h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Customize the behavior of the chatbot widget on your website.
+            </p>
+            <div className="flex items-center justify-between p-3 bg-slate-950 rounded-xl border border-slate-850">
+              <div>
+                <p className="text-xs font-semibold text-slate-200">Show Reference Sources</p>
+                <p className="text-xxs text-slate-500 mt-0.5">Display links to crawled pages used to generate answers.</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={toggleSources}
+                  disabled={savingSettings || !isEditor}
+                  className={`${
+                    showSources ? 'bg-violet-600' : 'bg-slate-700'
+                  } relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none disabled:opacity-50 cursor-pointer`}
+                >
+                  <span
+                    className={`${
+                      showSources ? 'translate-x-6' : 'translate-x-1'
+                    } inline-block h-4 w-4 transform rounded-full bg-white transition-transform`}
+                  />
+                </button>
+                {!isEditor && <Lock size={12} className="text-slate-500" />}
+              </div>
+            </div>
           </div>
 
           {/* Domain Restriction */}
