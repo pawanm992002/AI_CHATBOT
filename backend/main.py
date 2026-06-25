@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import FileResponse, RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
-from controllers import tenants, crawl, chat, sources, faqs, text_docs, leads, admin, knowledge_improvement
+from controllers import tenants, crawl, chat, sources, faqs, text_docs, leads, admin, knowledge_improvement, providers
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from core.auth import db, limiter
@@ -49,6 +49,7 @@ app.include_router(text_docs.router)
 app.include_router(leads.router)
 app.include_router(admin.router)
 app.include_router(knowledge_improvement.router)
+app.include_router(providers.router)
 
 backend_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.abspath(os.path.join(backend_dir, ".."))

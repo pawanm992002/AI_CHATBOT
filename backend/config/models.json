@@ -1,0 +1,30 @@
+[
+  {
+    "provider": "groq",
+    "id": "llama-3.3-70b-versatile",
+    "name": "Llama 3.3 70B",
+    "input_price": 0.59,
+    "output_price": 0.79
+  },
+  {
+    "provider": "groq",
+    "id": "qwen/qwen3-32b",
+    "name": "Qwen3 32B",
+    "input_price": 0.29,
+    "output_price": 0.59
+  },
+  {
+    "provider": "openrouter",
+    "id": "deepseek/deepseek-chat-v3-0324",
+    "name": "DeepSeek V3",
+    "input_price": 0.27,
+    "output_price": 1.10
+  },
+  {
+    "provider": "openai",
+    "id": "gpt-4.1-mini",
+    "name": "GPT-4.1 Mini",
+    "input_price": 0.40,
+    "output_price": 1.60
+  }
+]

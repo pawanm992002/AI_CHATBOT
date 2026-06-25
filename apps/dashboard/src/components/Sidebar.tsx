@@ -1,11 +1,11 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { 
-  LayoutDashboard, 
-  Database, 
-  RefreshCw, 
-  AlertCircle, 
-  Users, 
-  Settings, 
+import {
+  LayoutDashboard,
+  Database,
+  RefreshCw,
+  AlertCircle,
+  Users,
+  Settings,
   LogOut,
   X,
   Bot,
@@ -25,7 +25,11 @@ export const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
   const { state, dispatch } = useStore();
 
   const handleLogout = async () => {
-    try { await publicAxios.post('/tenants/logout'); } catch {}
+    try {
+      await publicAxios.post('/tenants/logout');
+    } catch {
+      // ignore logout failures and proceed to reset UI
+    }
     dispatch({ type: 'RESET_STORE' });
     navigate('/login');
   };

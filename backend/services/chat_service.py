@@ -8,6 +8,7 @@ import numpy as np
 from core.auth import db
 from core.redis import redis_client
 from services.embedder import openai_client
+from services.llm.factory import get_llm
 from services.vector_search import search_chunks
 from views.responses import ChatSource
 
@@ -62,12 +63,19 @@ _DEVANAGARI_PATTERN = re.compile(r"[\u0900-\u097F]")
 
 
 class ChatService:
+    def _tenant_llm_provider_model(self, tenant: dict) -> tuple[str, str]:
+        ai_cfg = tenant.get("ai") or {}
+        provider = (ai_cfg.get("provider") or "openai").strip()
+        model = (ai_cfg.get("model") or "gpt-4o-mini").strip()
+        return provider, model
+
     async def handle_message(self, turn: ChatTurnInput) -> ChatTurnResult:
         tenant_id = turn.tenant["tenant_id"]
         business_name = turn.tenant.get("business_name") or turn.tenant["domain"]
+        provider, model = self._tenant_llm_provider_model(turn.tenant)
 
         summary, messages = await self._load_conversation_context(turn.session_id)
-        classification = await self._classify_query(turn.query, summary, messages)
+        classification = await self._classify_query(turn.query, summary, messages, provider, model)
 
         if classification == QueryClass.GREETING:
             answer = f"Hello! Welcome to {business_name}. How can I help you today?"
@@ -77,9 +85,9 @@ class ChatService:
         if classification == QueryClass.OUT_OF_SCOPE:
             messages.append({"role": "user", "content": turn.query})
             system_prompt = prompts.NO_MATCH_OUT_OF_SCOPE_PROMPT.format(business_name=business_name)
-            answer, show_form = await self._complete_answer(system_prompt, messages)
+            answer, show_form = await self._complete_answer(system_prompt, messages, provider, model)
             messages.append({"role": "assistant", "content": answer})
-            summary, messages = await self._compact_if_needed(summary, messages)
+            summary, messages = await self._compact_if_needed(summary, messages, provider, model)
             await self._persist_conversation(turn, summary, messages)
             await self._track_visitor_message(turn.session_id)
             return ChatTurnResult(message_id=turn.message_id, answer=answer, sources=[], show_enquiry_form=show_form)
@@ -89,7 +97,7 @@ class ChatService:
         if self._is_contextual_followup(turn.query) and (summary or messages):
             search_query = self._build_contextual_search_query(turn.query, summary, messages)
         elif classification == QueryClass.NEEDS_REWRITE:
-            search_query = await self._rewrite_search_query(turn.query, summary, messages)
+            search_query = await self._rewrite_search_query(turn.query, summary, messages, provider, model)
         elif classification == QueryClass.SEARCH_READY:
             search_query = turn.query
         else:
@@ -124,17 +132,26 @@ class ChatService:
     ) -> ChatTurnResult:
         tenant_id = turn.tenant["tenant_id"]
         business_name = turn.tenant.get("business_name") or turn.tenant["domain"]
-        gap_type = "out_of_scope" if classification == QueryClass.OUT_OF_SCOPE else await self._evaluate_no_match(
-            turn.query, turn.tenant.get("description")
+        tenant_ai_provider, tenant_ai_model = self._tenant_llm_provider_model(turn.tenant)
+        gap_type = (
+            "out_of_scope"
+            if classification == QueryClass.OUT_OF_SCOPE
+            else await self._evaluate_no_match(
+                turn.query,
+                turn.tenant.get("description"),
+                tenant_ai_provider,
+                tenant_ai_model,
+            )
         )
         print(f"[CHAT] No match. Gap type: {gap_type}")
 
         messages.append({"role": "user", "content": turn.query})
         system_prompt = self._build_no_match_prompt(turn, summary, messages, gap_type)
-        answer, show_form = await self._complete_answer(system_prompt, messages)
+        tenant_ai_provider, tenant_ai_model = self._tenant_llm_provider_model(turn.tenant)
+        answer, show_form = await self._complete_answer(system_prompt, messages, tenant_ai_provider, tenant_ai_model)
         messages.append({"role": "assistant", "content": answer})
 
-        summary, messages = await self._compact_if_needed(summary, messages)
+        summary, messages = await self._compact_if_needed(summary, messages, tenant_ai_provider, tenant_ai_model)
         await self._persist_conversation(turn, summary, messages)
         await self._track_visitor_message(turn.session_id)
         if not show_form:
@@ -168,16 +185,24 @@ class ChatService:
             system_prompt += f"\n\nHere is a summary of the conversation so far:\n{summary}"
 
         messages.append({"role": "user", "content": turn.query})
-        answer, show_form = await self._complete_answer(system_prompt, messages)
+        tenant_ai_provider, tenant_ai_model = self._tenant_llm_provider_model(turn.tenant)
+        answer, show_form = await self._complete_answer(system_prompt, messages, tenant_ai_provider, tenant_ai_model)
         messages.append({"role": "assistant", "content": answer})
 
-        summary, messages = await self._compact_if_needed(summary, messages)
+        summary, messages = await self._compact_if_needed(summary, messages, tenant_ai_provider, tenant_ai_model)
         await self._persist_conversation(turn, summary, messages)
         await self._track_visitor_message(turn.session_id)
 
         return ChatTurnResult(message_id=turn.message_id, answer=answer, sources=sources, show_enquiry_form=show_form)
 
-    async def _classify_query(self, query: str, summary: str, messages: list[dict]) -> QueryClass:
+    async def _classify_query(
+        self,
+        query: str,
+        summary: str,
+        messages: list[dict],
+        provider: str,
+        model: str,
+    ) -> QueryClass:
         q = query.strip()
         if self._is_greeting(q):
             return QueryClass.GREETING
@@ -192,21 +217,26 @@ class ChatService:
             user_prompt = f"Conversation so far:\n{conversation_text}\n\nLatest user message: {q}"
 
         try:
-            resp = await openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
+            llm = get_llm(provider, model)
+            resp = await llm.ainvoke(
+                [
                     {"role": "system", "content": prompts.QUERY_CLASSIFIER_PROMPT},
                     {"role": "user", "content": user_prompt},
-                ],
-                max_tokens=20,
-                temperature=0.0,
+                ]
             )
-            label = resp.choices[0].message.content.strip().upper()
+            label = (resp.content or "").strip().upper()
             return QueryClass(label) if label in QueryClass.__members__ else QueryClass.NEEDS_REWRITE
         except Exception:
             return QueryClass.SEARCH_READY
 
-    async def _rewrite_search_query(self, query: str, summary: str, messages: list[dict]) -> str:
+    async def _rewrite_search_query(
+        self,
+        query: str,
+        summary: str,
+        messages: list[dict],
+        provider: str,
+        model: str,
+    ) -> str:
         conversation_text = self._recent_conversation_text(summary, messages)
         user_prompt = f"Latest user message: {query.strip()}"
         if conversation_text:
@@ -216,16 +246,14 @@ class ChatService:
             )
 
         try:
-            resp = await openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
+            llm = get_llm(provider, model)
+            resp = await llm.ainvoke(
+                [
                     {"role": "system", "content": prompts.QUERY_REWRITE_PROMPT},
                     {"role": "user", "content": user_prompt},
-                ],
-                max_tokens=80,
-                temperature=0.0,
+                ]
             )
-            rewritten = resp.choices[0].message.content.strip()
+            rewritten = (resp.content or "").strip()
             return rewritten if rewritten and len(rewritten) <= 240 else query.strip()
         except Exception:
             return query.strip()
@@ -254,13 +282,17 @@ class ChatService:
             prompt += f"\n\nHere is a summary of the conversation so far:\n{summary}"
         return prompt
 
-    async def _complete_answer(self, system_prompt: str, messages: list[dict], model: str = "gpt-4o") -> tuple[str, bool]:
+    async def _complete_answer(
+        self,
+        system_prompt: str,
+        messages: list[dict],
+        provider: str,
+        model: str,
+    ) -> tuple[str, bool]:
         api_messages = [{"role": "system", "content": system_prompt}] + messages[-MAX_HISTORY:]
-        response = await openai_client.chat.completions.create(
-            model=model,
-            messages=api_messages,
-        )
-        answer = response.choices[0].message.content
+        llm = get_llm(provider, model)
+        response = await llm.ainvoke(api_messages)
+        answer = response.content
         show_form = "[ENQUIRY_FORM]" in answer
         if show_form:
             answer = answer.replace("[ENQUIRY_FORM]", "").strip()
@@ -311,16 +343,28 @@ class ChatService:
             {"$addToSet": {"conversation_ids": session_id}, "$inc": {"total_messages": 1}},
         )
 
-    async def _compact_if_needed(self, summary: str, messages: list[dict]) -> tuple[str, list[dict]]:
+    async def _compact_if_needed(
+        self,
+        summary: str,
+        messages: list[dict],
+        provider: str,
+        model: str,
+    ) -> tuple[str, list[dict]]:
         if len(messages) < 32:
             return summary, messages
 
         messages_to_keep = messages[-30:]
         messages_to_summarize = messages[:-30]
-        summary = await self._summarize_past_context(summary, messages_to_summarize)
+        summary = await self._summarize_past_context(summary, messages_to_summarize, provider, model)
         return summary, messages_to_keep
 
-    async def _summarize_past_context(self, previous_summary: str, messages_to_summarize: list[dict]) -> str:
+    async def _summarize_past_context(
+        self,
+        previous_summary: str,
+        messages_to_summarize: list[dict],
+        provider: str,
+        model: str,
+    ) -> str:
         formatted_history = "\n".join([
             f"{'Visitor' if msg['role'] == 'user' else 'Bot'}: {msg['content']}"
             for msg in messages_to_summarize
@@ -337,33 +381,35 @@ class ChatService:
         )
 
         try:
-            resp = await openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
+            llm = get_llm(provider, model)
+            resp = await llm.ainvoke(
+                [
                     {"role": "system", "content": prompts.SUMMARY_SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},
-                ],
-                max_tokens=max_tokens,
-                temperature=0.3,
+                ]
             )
-            return resp.choices[0].message.content.strip()
+            return (resp.content or "").strip()
         except Exception as e:
             print(f"Failed to summarize chat history: {e}")
             return previous_summary
 
-    async def _evaluate_no_match(self, query: str, description: str | None = None) -> str:
+    async def _evaluate_no_match(
+        self,
+        query: str,
+        description: str | None = None,
+        provider: str = "openai",
+        model: str = "gpt-4o-mini",
+    ) -> str:
         business_context = f"\nThis website is about: {description}" if description else ""
         try:
-            resp = await openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
+            llm = get_llm(provider, model)
+            resp = await llm.ainvoke(
+                [
                     {"role": "system", "content": prompts.NO_MATCH_EVALUATOR_PROMPT.format(business_context=business_context)},
                     {"role": "user", "content": query},
-                ],
-                max_tokens=20,
-                temperature=0.0,
+                ]
             )
-            result = resp.choices[0].message.content.strip().upper()
+            result = (resp.content or "").strip().upper()
             if "OUT_OF_SCOPE" in result:
                 return "out_of_scope"
             return "knowledge_gap"
