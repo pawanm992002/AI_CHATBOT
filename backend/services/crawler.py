@@ -152,9 +152,6 @@ async def _crawl_with_firecrawl(seed_url: str) -> list[dict]:
                 "limit": settings.MAX_CRAWL_PAGES,
                 "scrapeOptions": {
                     "formats": ["markdown"],
-                    "actions": [
-                        {"type": "wait", "milliseconds": 10000},
-                    ],
                 }
             }
         )
