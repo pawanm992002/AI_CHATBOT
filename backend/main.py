@@ -5,7 +5,6 @@ from controllers import tenants, crawl, chat, sources, faqs, text_docs, leads, a
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from core.auth import db, limiter
-from core.config import settings
 from fastapi.staticfiles import StaticFiles
 import os
 
@@ -60,25 +59,22 @@ uploads_dir = os.path.join(backend_dir, "uploads")
 
 os.makedirs(widget_dist, exist_ok=True)
 os.makedirs(uploads_dir, exist_ok=True)
+app.mount("/static", StaticFiles(directory=widget_dist), name="static")
 
-# In production, static files are served by Nginx instead of Python
-if settings.APP_ENV != "production":
-    app.mount("/static", StaticFiles(directory=widget_dist), name="static")
-
-    os.makedirs(dashboard_dist, exist_ok=True)
-    dashboard_assets = os.path.join(dashboard_dist, "assets")
-    if os.path.isdir(dashboard_assets):
-        app.mount("/dashboard/assets", StaticFiles(directory=dashboard_assets), name="dashboard_assets")
+os.makedirs(dashboard_dist, exist_ok=True)
+dashboard_assets = os.path.join(dashboard_dist, "assets")
+if os.path.isdir(dashboard_assets):
+    app.mount("/dashboard/assets", StaticFiles(directory=dashboard_assets), name="dashboard_assets")
 
 
-    @app.get("/dashboard/{full_path:path}")
-    async def dashboard_spa(full_path: str):
-        return FileResponse(os.path.join(dashboard_dist, "index.html"))
+@app.get("/dashboard/{full_path:path}")
+async def dashboard_spa(full_path: str):
+    return FileResponse(os.path.join(dashboard_dist, "index.html"))
 
 
-    @app.get("/")
-    async def root():
-        return RedirectResponse(url="/dashboard/")
+@app.get("/")
+async def root():
+    return RedirectResponse(url="/dashboard/")
 
 
 @app.on_event("startup")
