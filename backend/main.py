@@ -130,3 +130,9 @@ async def ensure_lookup_indexes():
     await db.knowledge_gaps.create_index([("tenant_id", 1), ("cluster_id", 1)])
     await db.source_jobs.create_index([("tenant_id", 1), ("source_id", 1), ("started_at", -1)])
     await db.source_jobs.create_index([("tenant_id", 1), ("job_type", 1)])
+
+
+@app.on_event("shutdown")
+def shutdown_db_client():
+    from core.auth import client
+    client.close()
