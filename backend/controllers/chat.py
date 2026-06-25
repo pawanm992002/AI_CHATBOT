@@ -119,6 +119,14 @@ async def websocket_chat(websocket: WebSocket, key_hash: str = Query(...)):
         await websocket.close(code=4001, reason="Invalid API key")
         return
 
+    status_val = tenant.get("status", "approved")
+    if status_val == "disabled":
+        await websocket.close(code=4003, reason="Tenant is disabled")
+        return
+    elif status_val != "approved":
+        await websocket.close(code=4003, reason="Tenant is not active")
+        return
+
     await websocket.send_json({"type": "authenticated"})
 
     try:

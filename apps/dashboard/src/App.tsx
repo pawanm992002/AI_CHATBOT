@@ -63,6 +63,23 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     return document.documentElement.classList.contains('light') ? 'light' : 'dark';
   });
+  const [pendingCount, setPendingCount] = useState(0);
+
+  useEffect(() => {
+    const fetchPendingCount = async () => {
+      try {
+        const response = await adminAxios.get('/admin/tenants', {
+          params: { page: 1, limit: 1, status: 'pending' }
+        });
+        setPendingCount(response.data.total);
+      } catch (e) {
+        // Ignored
+      }
+    };
+    fetchPendingCount();
+    const interval = setInterval(fetchPendingCount, 15000);
+    return () => clearInterval(interval);
+  }, []);
 
   React.useEffect(() => {
     document.title = "System Admin Dashboard";
@@ -94,29 +111,36 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
       {/* Admin Sidebar */}
       <aside className="w-64 border-r border-slate-800 bg-slate-900 px-6 py-6 flex flex-col">
         <div className="flex items-center gap-3 mb-8">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-purple-600 text-white shadow-lg shadow-purple-500/20">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-600 text-white shadow-lg shadow-violet-500/20">
             <Shield size={20} />
           </div>
           <div>
-            <span className="font-bold text-white text-md leading-tight block">System Admin</span>
-            <span className="text-xs text-purple-400 font-semibold uppercase tracking-wider">Control Panel</span>
+            <span className="font-bold text-slate-100 text-md leading-tight block">System Admin</span>
+            <span className="text-xs text-violet-400 font-semibold uppercase tracking-wider">Control Panel</span>
           </div>
         </div>
 
         <nav className="flex-1 space-y-1">
           <Link 
             to="/admin/tenants" 
-            className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all bg-purple-950/40 text-purple-400 hover:bg-purple-950/60"
+            className="flex items-center justify-between px-4 py-3 rounded-xl text-sm font-semibold transition-all bg-violet-950/40 text-violet-400 shadow-sm border border-violet-900/40 hover:bg-violet-950/60"
           >
-            <Users size={18} />
-            <span>Tenant Management</span>
+            <div className="flex items-center gap-3">
+              <Users size={18} />
+              <span>Tenant Management</span>
+            </div>
+            {pendingCount > 0 && (
+              <span className="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-xxs font-bold min-w-5 h-5 bg-rose-600 text-white animate-pulse">
+                {pendingCount}
+              </span>
+            )}
           </Link>
         </nav>
 
         <div className="border-t border-slate-800 pt-5">
           <button 
             onClick={handleLogout}
-            className="flex w-full items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold text-rose-400 hover:bg-rose-950/20 transition-all cursor-pointer"
+            className="flex w-full items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold text-rose-400 hover:bg-rose-955/20 hover:text-rose-500 transition-all cursor-pointer"
           >
             <LogOut size={18} />
             <span>Admin Logout</span>

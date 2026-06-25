@@ -139,7 +139,16 @@ class ApiClient {
     });
 
     if (!response.ok) {
-      throw new Error(`Request to ${path} failed with status ${response.status}`);
+      let detail = `Request to ${path} failed with status ${response.status}`;
+      try {
+        const errorData = await response.json();
+        if (errorData && errorData.detail) {
+          detail = errorData.detail;
+        }
+      } catch (e) {
+        // Not JSON
+      }
+      throw new Error(detail);
     }
 
     return response.json();

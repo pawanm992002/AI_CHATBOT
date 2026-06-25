@@ -3,6 +3,10 @@ export interface Tenant {
   domain: string;
   plan: 'free' | 'pro' | string;
   created_at: string;
+  business_name?: string;
+  email?: string;
+  status?: 'pending' | 'approved' | 'rejected' | 'disabled';
+  api_key?: string;
 }
 
 export type SourceType = 'website' | 'pdf' | 'faq' | 'text';

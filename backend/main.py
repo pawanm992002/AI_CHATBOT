@@ -78,6 +78,16 @@ async def root():
 
 
 @app.on_event("startup")
+async def backfill_tenant_statuses():
+    result = await db.tenants.update_many(
+        {"status": {"$exists": False}},
+        {"$set": {"status": "approved"}}
+    )
+    if result.modified_count:
+        print(f"Backfilled status for {result.modified_count} existing tenant(s)")
+
+
+@app.on_event("startup")
 async def apply_db_schemas():
     from core.schema_validator import ensure_schemas
     await ensure_schemas()

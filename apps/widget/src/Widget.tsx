@@ -42,6 +42,7 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
   const [isLoading, setIsLoading] = useState(false);
   const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([]);
   const [showSources, setShowSources] = useState<boolean>(true);
+  const [isDisabled, setIsDisabled] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -68,8 +69,11 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
         if (config && typeof config.show_sources === 'boolean') {
           setShowSources(config.show_sources);
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("Failed to fetch widget config", err);
+        if (err.message && err.message.includes("Tenant is disabled")) {
+          setIsDisabled(true);
+        }
       }
     };
     fetchConfig();
@@ -412,31 +416,54 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
             <Header palette={palette} onClose={() => setIsOpen(false)} />
 
             {/* Messages area */}
-            <div className="flex-1 flex flex-col overflow-hidden relative">
-              <MessageList
-                messages={messages}
-                suggestedQuestions={suggestedQuestions}
-                accent={accent}
-                isDark={isDark}
-                palette={palette}
-                onSend={handleSend}
-                onFeedback={handleFeedback}
-                onEnquirySubmit={handleEnquirySubmit}
-                showSources={showSources}
-              />
+            {isDisabled ? (
+              <div 
+                className="flex-1 flex flex-col items-center justify-center p-6 text-center animate-fadeIn"
+                style={{ background: palette.msgAreaBg || 'transparent' }}
+              >
+                <div 
+                  className="flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-500/10 text-rose-500 border border-rose-500/20 mb-4 animate-pulse"
+                >
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                    <line x1="12" y1="8" x2="12" y2="12" />
+                    <line x1="12" y1="16" x2="12.01" y2="16" />
+                  </svg>
+                </div>
+                <h3 className="font-bold text-sm" style={{ color: palette.inputText }}>Service Blocked</h3>
+                <p className="text-xs mt-2 max-w-[200px] leading-relaxed" style={{ color: palette.subtleText }}>
+                  Tenant is disabled. Please contact the administrator.
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="flex-1 flex flex-col overflow-hidden relative">
+                  <MessageList
+                    messages={messages}
+                    suggestedQuestions={suggestedQuestions}
+                    accent={accent}
+                    isDark={isDark}
+                    palette={palette}
+                    onSend={handleSend}
+                    onFeedback={handleFeedback}
+                    onEnquirySubmit={handleEnquirySubmit}
+                    showSources={showSources}
+                  />
 
-              <div ref={messagesEndRef} />
-            </div>
+                  <div ref={messagesEndRef} />
+                </div>
 
-            {/* Input area */}
-            <InputArea
-              isLoading={isLoading}
-              accent={accent}
-              font={font}
-              isDark={isDark}
-              palette={palette}
-              onSend={handleSend}
-            />
+                {/* Input area */}
+                <InputArea
+                  isLoading={isLoading}
+                  accent={accent}
+                  font={font}
+                  isDark={isDark}
+                  palette={palette}
+                  onSend={handleSend}
+                />
+              </>
+            )}
           </div>
         </>
       ) : (

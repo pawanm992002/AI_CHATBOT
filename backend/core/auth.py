@@ -113,6 +113,24 @@ async def get_current_tenant(request: Request):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Tenant not found",
         )
+    
+    status_val = tenant.get("status", "approved")
+    if status_val == "disabled":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tenant is disabled",
+        )
+    elif status_val == "pending":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your registration is pending approval",
+        )
+    elif status_val == "rejected":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your registration has been rejected",
+        )
+        
     return tenant
 
 async def get_current_admin(request: Request):
@@ -132,6 +150,12 @@ async def verify_api_key(request: Request, credentials: HTTPAuthorizationCredent
     tenant = await db.tenants.find_one({"api_key": api_key})
     if not tenant:
         raise HTTPException(status_code=403, detail="Invalid API Key")
+
+    status_val = tenant.get("status", "approved")
+    if status_val == "disabled":
+        raise HTTPException(status_code=403, detail="Tenant is disabled")
+    elif status_val != "approved":
+        raise HTTPException(status_code=403, detail="Tenant is not active")
 
     origin = request.headers.get("origin")
     if origin and settings.ENFORCE_DOMAIN and "localhost" not in origin:
