@@ -13,7 +13,9 @@ class LeadRepository:
         return lead_data
 
     async def get_by_tenant(self, tenant_id: str, skip: int = 0, limit: int = 50) -> List[Dict[str, Any]]:
-        cursor = self.collection.find({"tenant_id": tenant_id}).sort("created_at", -1).skip(skip).limit(limit)
+        cursor = self.collection.find(
+            {"tenant_id": tenant_id}, {"_id": 0}
+        ).sort("created_at", -1).skip(skip).limit(limit)
         return await cursor.to_list(length=limit)
 
     async def count_by_tenant(self, tenant_id: str) -> int:

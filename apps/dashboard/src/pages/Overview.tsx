@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { privateAxios } from '../utils/axios';
-import { useStore } from '../store';
+import { useStore, hasAccess } from '../store';
 import { 
   Database, 
   Layers, 
@@ -10,7 +10,10 @@ import {
   CheckCircle,
   Chrome,
   Monitor,
-  ExternalLink
+  Globe,
+  Pencil,
+  Check,
+  X
 } from 'lucide-react';
 
 interface TenantStatsData {
@@ -23,14 +26,23 @@ interface TenantStatsData {
 const Overview = () => {
   const { state, dispatch } = useStore();
   const [tenantStats, setTenantStats] = useState<TenantStatsData | null>(null);
+  const [me, setMe] = useState<any>(null);
+  const [editing, setEditing] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editDesc, setEditDesc] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const isEditor = hasAccess(state.role, 'write');
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         dispatch({ type: 'SET_LOADING', payload: true });
-        const [statsRes, gapsRes] = await Promise.all([
+        const [statsRes, gapsRes, meRes] = await Promise.all([
           privateAxios.get('/tenants/stats'),
           privateAxios.get('/dashboard/knowledge/gaps/stats'),
+          privateAxios.get('/tenants/me'),
         ]);
 
         if (statsRes.status === 200) {
@@ -40,6 +52,12 @@ const Overview = () => {
         if (gapsRes.status === 200) {
           dispatch({ type: 'SET_STATS', payload: gapsRes.data });
         }
+        if (meRes.status === 200) {
+          setMe(meRes.data);
+          setEditName(meRes.data.business_name || '');
+          setEditEmail(meRes.data.email || '');
+          setEditDesc(meRes.data.description || '');
+        }
       } catch (err: any) {
         dispatch({ type: 'SET_ERROR', payload: err.message || 'Failed to load dashboard data' });
       } finally {
@@ -48,6 +66,22 @@ const Overview = () => {
     };
     fetchData();
   }, [dispatch]);
+
+  const saveBusinessInfo = async () => {
+    setSaving(true);
+    try {
+      await Promise.all([
+        privateAxios.put('/tenants/info', null, { params: { business_name: editName, email: editEmail } }),
+        privateAxios.put('/tenants/description', null, { params: { description: editDesc } }),
+      ]);
+      setMe((prev: any) => ({ ...prev, business_name: editName, email: editEmail, description: editDesc }));
+      setEditing(false);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const gapStats = state.stats;
 
@@ -122,6 +156,96 @@ const Overview = () => {
           );
         })}
       </div>
+
+      {/* Business Info & Description */}
+      {me && (
+        <div className="bg-slate-900 p-6 rounded-3xl border border-slate-800/80 shadow-lg space-y-5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Globe size={18} className="text-teal-400" />
+              <h3 className="text-sm font-bold text-white">Business Info</h3>
+            </div>
+            {!editing && isEditor && (
+              <button
+                onClick={() => setEditing(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+              >
+                <Pencil size={13} />
+                <span>Edit</span>
+              </button>
+            )}
+          </div>
+
+          {editing ? (
+            <div className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <label className="text-xxs font-bold text-slate-500 uppercase tracking-wider">Business Name</label>
+                  <input
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    className="w-full rounded-xl border border-slate-800 bg-slate-950 px-4 py-2.5 text-xs text-slate-200 focus:border-violet-600 focus:outline-none transition-all"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xxs font-bold text-slate-500 uppercase tracking-wider">Email</label>
+                  <input
+                    value={editEmail}
+                    onChange={(e) => setEditEmail(e.target.value)}
+                    className="w-full rounded-xl border border-slate-800 bg-slate-950 px-4 py-2.5 text-xs text-slate-200 focus:border-violet-600 focus:outline-none transition-all"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xxs font-bold text-slate-500 uppercase tracking-wider">Business Description</label>
+                <textarea
+                  value={editDesc}
+                  onChange={(e) => setEditDesc(e.target.value)}
+                  rows={3}
+                  placeholder="Describe what your business does..."
+                  className="w-full rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-xs text-slate-200 focus:border-violet-600 focus:outline-none transition-all resize-none"
+                />
+                <p className="text-xxs text-slate-500">Used by the AI to classify queries as knowledge gaps vs out-of-scope.</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={saveBusinessInfo}
+                  disabled={saving}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 text-xs font-semibold text-white rounded-lg shadow-sm hover:bg-violet-700 transition-colors disabled:opacity-50 cursor-pointer"
+                >
+                  <Check size={14} />
+                  {saving ? 'Saving...' : 'Save'}
+                </button>
+                <button
+                  onClick={() => {
+                    setEditing(false);
+                    setEditName(me.business_name || '');
+                    setEditEmail(me.email || '');
+                    setEditDesc(me.description || '');
+                  }}
+                  className="flex items-center gap-1.5 px-4 py-2 border border-slate-800 text-xs font-semibold text-slate-400 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  <X size={14} />
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-x-8 gap-y-1 text-xs text-slate-400">
+                <p>Business name: <strong className="text-white font-bold">{me.business_name || 'Not set'}</strong></p>
+                <p>Domain: <strong className="text-white font-bold">{me.domain}</strong></p>
+                {me.email && (
+                  <p>Email: <strong className="text-white font-bold">{me.email}</strong></p>
+                )}
+              </div>
+              {me.description && (
+                <p className="text-xs text-slate-500 leading-relaxed">{me.description}</p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Stats Cards Section */}
       {gapStats && (
