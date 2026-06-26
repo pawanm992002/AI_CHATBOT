@@ -68,3 +68,15 @@ adminAxios.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+const addApiPrefix = (config: any) => {
+  if (config.url && !config.url.startsWith('/api') && !config.url.startsWith('http')) {
+    config.url = `/api${config.url}`;
+  }
+  return config;
+};
+
+publicAxios.interceptors.request.use(addApiPrefix);
+privateAxios.interceptors.request.use(addApiPrefix);
+adminAxios.interceptors.request.use(addApiPrefix);
+

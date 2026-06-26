@@ -8,10 +8,14 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
-      '^/(tenants|admin|chat|static|ws|widget|leads|feedback|dashboard/(sources|crawl|knowledge|docs|leads))': {
+      '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
         ws: true
+      },
+      '/static': {
+        target: 'http://localhost:8000',
+        changeOrigin: true
       }
     }
   }

@@ -120,7 +120,7 @@ class ApiClient {
     const keyHash = await sha256(this.apiKey);
     const protocol = this.apiBaseUrl.startsWith('https') ? 'wss' : 'ws';
     const host = this.apiBaseUrl.replace(/^https?:\/\//, '');
-    const url = `${protocol}://${host}/ws/chat?key_hash=${keyHash}`;
+    const url = `${protocol}://${host}/api/ws/chat?key_hash=${keyHash}`;
     return new WebSocket(url);
   }
 
@@ -133,7 +133,8 @@ class ApiClient {
       headers.set("Content-Type", "application/json");
     }
 
-    const response = await fetch(`${this.apiBaseUrl}${path}`, {
+    const cleanPath = path.startsWith('/api') ? path : `/api${path}`;
+    const response = await fetch(`${this.apiBaseUrl}${cleanPath}`, {
       ...options,
       headers,
     });
