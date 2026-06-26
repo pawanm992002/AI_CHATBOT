@@ -104,6 +104,15 @@ async def cleanup_stale_jobs():
 
 
 @app.on_event("startup")
+async def cleanup_stale_source_jobs():
+    from repositories.source_job_repository import SourceJobRepository
+    repo = SourceJobRepository()
+    modified = await repo.mark_stale_running_as_failed()
+    if modified:
+        print(f"Cleaned up {modified} stale source job(s)")
+
+
+@app.on_event("startup")
 async def backfill_api_key_hashes():
     from core.auth import hash_api_key
     cursor = db.tenants.find({"api_key_hash": {"$exists": False}}, {"tenant_id": 1, "api_key": 1})

@@ -28,3 +28,14 @@ class SourceJobRepository:
             {"$set": update_data}
         )
         return result.modified_count > 0
+
+    async def mark_stale_running_as_failed(self) -> int:
+        result = await self.collection.update_many(
+            {"status": "running"},
+            {"$set": {
+                "status": "failed",
+                "error": "Server restarted — background task was interrupted",
+                "finished_at": datetime.now(timezone.utc),
+            }}
+        )
+        return result.modified_count
