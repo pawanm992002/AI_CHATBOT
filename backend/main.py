@@ -98,7 +98,6 @@ async def apply_db_schemas():
     except Exception as e:
         print(f"Startup: apply_db_schemas failed: {e}")
 
-
 @app.on_event("startup")
 async def cleanup_stale_jobs():
     try:
@@ -110,7 +109,6 @@ async def cleanup_stale_jobs():
             print(f"Cleaned up {modified} stale crawl job(s)")
     except Exception as e:
         print(f"Startup: cleanup_stale_jobs failed: {e}")
-
 
 @app.on_event("startup")
 async def backfill_api_key_hashes():

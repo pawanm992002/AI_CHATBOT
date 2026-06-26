@@ -1,5 +1,5 @@
 from typing import Optional, List, Dict, Any
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from core.auth import db
 
 
@@ -46,13 +46,23 @@ class CrawlJobRepository:
     async def count_by_tenant(self, tenant_id: str) -> int:
         return await self.collection.count_documents({"tenant_id": tenant_id})
 
-    async def mark_stale_running_as_failed(self) -> int:
+    async def mark_stale_running_as_failed(self, stale_after_minutes: int = 20) -> int:
+        """
+        Mark only genuinely stale 'running' jobs as failed.
+        This prevents false failures during short restarts/redeploys.
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=stale_after_minutes)
         result = await self.collection.update_many(
-            {"status": "running"},
-            {"$set": {
-                "status": "failed",
-                "error": "Server restarted — crawl task was interrupted",
-                "finished_at": datetime.now(timezone.utc),
-            }}
+            {
+                "status": "running",
+                "started_at": {"$lt": cutoff},
+            },
+            {
+                "$set": {
+                    "status": "failed",
+                    "error": "Server restarted — crawl task was interrupted (stale job)",
+                    "finished_at": datetime.now(timezone.utc),
+                }
+            },
         )
         return result.modified_count
