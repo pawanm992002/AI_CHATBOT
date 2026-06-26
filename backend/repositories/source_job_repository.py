@@ -1,5 +1,5 @@
 from typing import Optional, List, Dict, Any
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from core.auth import db
 
 
@@ -12,30 +12,53 @@ class SourceJobRepository:
         job_data["_id"] = result.inserted_id
         return job_data
 
-    async def get_by_tenant(self, tenant_id: str, job_type: Optional[str] = None, skip: int = 0, limit: int = 50) -> List[Dict[str, Any]]:
+    async def get_by_tenant(
+        self,
+        tenant_id: str,
+        job_type: Optional[str] = None,
+        skip: int = 0,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
         query = {"tenant_id": tenant_id}
         if job_type:
             query["job_type"] = job_type
         cursor = self.collection.find(query).sort("started_at", -1).skip(skip).limit(limit)
         return await cursor.to_list(length=limit)
 
-    async def update_status(self, tenant_id: str, source_id: str, job_type: str, status: str, **kwargs) -> bool:
+    async def update_status(
+        self,
+        tenant_id: str,
+        source_id: str,
+        job_type: str,
+        status: str,
+        **kwargs,
+    ) -> bool:
         update_data = {"status": status, **kwargs}
         if status in ("completed", "failed"):
             update_data["finished_at"] = datetime.now(timezone.utc)
         result = await self.collection.update_one(
             {"tenant_id": tenant_id, "source_id": source_id, "job_type": job_type},
-            {"$set": update_data}
+            {"$set": update_data},
         )
         return result.modified_count > 0
 
-    async def mark_stale_running_as_failed(self) -> int:
+    async def mark_stale_running_as_failed(self, stale_after_minutes: int = 20) -> int:
+        """
+        Mark only genuinely stale 'running' jobs as failed.
+        This prevents false failures during short restarts/redeploys.
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=stale_after_minutes)
         result = await self.collection.update_many(
-            {"status": "running"},
-            {"$set": {
-                "status": "failed",
-                "error": "Server restarted — background task was interrupted",
-                "finished_at": datetime.now(timezone.utc),
-            }}
+            {
+                "status": "running",
+                "started_at": {"$lt": cutoff},
+            },
+            {
+                "$set": {
+                    "status": "failed",
+                    "error": "Server restarted — background task was interrupted (stale job)",
+                    "finished_at": datetime.now(timezone.utc),
+                }
+            },
         )
         return result.modified_count

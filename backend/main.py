@@ -98,7 +98,7 @@ async def cleanup_stale_jobs():
     from datetime import datetime, timezone
     from repositories.crawl_job_repository import CrawlJobRepository
     repo = CrawlJobRepository()
-    modified = await repo.mark_stale_running_as_failed()
+    modified = await repo.mark_stale_running_as_failed(stale_after_minutes=20)
     if modified:
         print(f"Cleaned up {modified} stale crawl job(s)")
 
@@ -107,7 +107,7 @@ async def cleanup_stale_jobs():
 async def cleanup_stale_source_jobs():
     from repositories.source_job_repository import SourceJobRepository
     repo = SourceJobRepository()
-    modified = await repo.mark_stale_running_as_failed()
+    modified = await repo.mark_stale_running_as_failed(stale_after_minutes=20)
     if modified:
         print(f"Cleaned up {modified} stale source job(s)")
 
