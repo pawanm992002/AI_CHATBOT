@@ -93,24 +93,6 @@ async def apply_db_schemas():
     await ensure_schemas()
 
 
-@app.on_event("startup")
-async def cleanup_stale_jobs():
-    from datetime import datetime, timezone
-    from repositories.crawl_job_repository import CrawlJobRepository
-    repo = CrawlJobRepository()
-    modified = await repo.mark_stale_running_as_failed(stale_after_minutes=20)
-    if modified:
-        print(f"Cleaned up {modified} stale crawl job(s)")
-
-
-@app.on_event("startup")
-async def cleanup_stale_source_jobs():
-    from repositories.source_job_repository import SourceJobRepository
-    repo = SourceJobRepository()
-    modified = await repo.mark_stale_running_as_failed(stale_after_minutes=20)
-    if modified:
-        print(f"Cleaned up {modified} stale source job(s)")
-
 
 @app.on_event("startup")
 async def backfill_api_key_hashes():
