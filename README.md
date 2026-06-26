@@ -868,100 +868,100 @@ The embeddable chat widget (`apps/widget/`) is built as a self-executing IIFE bu
 ### Widget & Chat
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
-| GET | `/widget/config` | API Key | Get widget config (theme, suggested questions, lead form) |
-| POST | `/chat` | API Key | Chat with the widget (returns `message_id`) |
-| POST | `/feedback` | API Key | Submit like/dislike feedback for a message |
-| WS | `/ws/chat?key_hash=...` | WebSocket + SHA-256 key hash | WebSocket streaming chat |
+| GET | `/api/widget/config` | API Key | Get widget config (theme, suggested questions, lead form) |
+| POST | `/api/chat` | API Key | Chat with the widget (returns `message_id`) |
+| POST | `/api/feedback` | API Key | Submit like/dislike feedback for a message |
+| WS | `/api/ws/chat?key_hash=...` | WebSocket + SHA-256 key hash | WebSocket streaming chat |
 
 ### Tenant Auth & Profile
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
-| POST | `/tenants/register` | None | Register a new tenant |
-| POST | `/tenants/login` | None | Login (sets JWT cookie) |
-| POST | `/tenants/logout` | None | Clear auth cookie |
-| GET | `/tenants/me` | JWT | Get tenant info + suggested questions |
-| GET | `/tenants/stats` | JWT | Tenant stats |
-| POST | `/tenants/rotate-key` | JWT | Rotate API key |
-| PUT | `/tenants/suggested-questions` | JWT | Save manual suggested questions |
-| PUT | `/tenants/description` | JWT | Update business description |
-| PUT | `/tenants/widget-settings` | JWT | Toggle widget `show_sources` setting |
-| GET | `/tenants/analytics/feedback` | JWT | Get feedback analytics (likes, dislikes, ratio) |
-| GET | `/tenants/test` | JWT | Serve HTML test page with widget pre-configured |
+| POST | `/api/tenants/register` | None | Register a new tenant |
+| POST | `/api/tenants/login` | None | Login (sets JWT cookie) |
+| POST | `/api/tenants/logout` | None | Clear auth cookie |
+| GET | `/api/tenants/me` | JWT | Get tenant info + suggested questions |
+| GET | `/api/tenants/stats` | JWT | Tenant stats |
+| POST | `/api/tenants/rotate-key` | JWT | Rotate API key |
+| PUT | `/api/tenants/suggested-questions` | JWT | Save manual suggested questions |
+| PUT | `/api/tenants/description` | JWT | Update business description |
+| PUT | `/api/tenants/widget-settings` | JWT | Toggle widget `show_sources` setting |
+| GET | `/api/tenants/analytics/feedback` | JWT | Get feedback analytics (likes, dislikes, ratio) |
+| GET | `/api/tenants/test` | JWT | Serve HTML test page with widget pre-configured |
 
 ### Crawl (Widget API Key)
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
-| POST | `/crawl` | API Key | Start a crawl job |
-| GET | `/crawl/{job_id}` | API Key | Check crawl status |
-| DELETE | `/index` | API Key | Delete all indexed data for tenant |
+| POST | `/api/crawl` | API Key | Start a crawl job |
+| GET | `/api/crawl/{job_id}` | API Key | Check crawl status |
+| DELETE | `/api/index` | API Key | Delete all indexed data for tenant |
 
 ### Crawl (Dashboard JWT)
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
-| POST | `/dashboard/crawl` | JWT | Start a crawl (dashboard) |
-| GET | `/dashboard/crawl/history` | JWT | Paginated crawl job history |
-| GET | `/dashboard/crawl/{job_id}` | JWT | Get crawl job details |
-| GET | `/dashboard/crawl/{job_id}/urls` | JWT | Paginated list of URLs crawled in a job |
-| DELETE | `/dashboard/index` | JWT | Delete all indexed data (dashboard) |
+| POST | `/api/dashboard/crawl` | JWT | Start a crawl (dashboard) |
+| GET | `/api/dashboard/crawl/history` | JWT | Paginated crawl job history |
+| GET | `/api/dashboard/crawl/{job_id}` | JWT | Get crawl job details |
+| GET | `/api/dashboard/crawl/{job_id}/urls` | JWT | Paginated list of URLs crawled in a job |
+| DELETE | `/api/dashboard/index` | JWT | Delete all indexed data (dashboard) |
 
 ### Knowledge Sources
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
-| GET | `/dashboard/sources` | JWT | List all knowledge sources (with chunk counts) |
-| POST | `/dashboard/sources` | JWT | Create a source container (pdf/faq/text/website) |
-| GET | `/dashboard/sources/history` | JWT | Paginated source job history (all types) |
-| GET | `/dashboard/sources/history/{source_id}` | JWT | Paginated source job history for specific source |
-| GET | `/dashboard/sources/{source_id}` | JWT | Get source details + chunk count |
-| DELETE | `/dashboard/sources/{source_id}` | JWT | Delete source + indexed data |
-| DELETE | `/dashboard/sources/crawl/{job_id}` | JWT | Delete crawl source by job_id |
-| POST | `/dashboard/sources/pdf/upload` | JWT | Upload and index a PDF |
+| GET | `/api/dashboard/sources` | JWT | List all knowledge sources (with chunk counts) |
+| POST | `/api/dashboard/sources` | JWT | Create a source container (pdf/faq/text/website) |
+| GET | `/api/dashboard/sources/history` | JWT | Paginated source job history (all types) |
+| GET | `/api/dashboard/sources/history/{source_id}` | JWT | Paginated source job history for specific source |
+| GET | `/api/dashboard/sources/{source_id}` | JWT | Get source details + chunk count |
+| DELETE | `/api/dashboard/sources/{source_id}` | JWT | Delete source + indexed data |
+| DELETE | `/api/dashboard/sources/crawl/{job_id}` | JWT | Delete crawl source by job_id |
+| POST | `/api/dashboard/sources/pdf/upload` | JWT | Upload and index a PDF |
 
 ### FAQs
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
-| GET | `/dashboard/sources/{source_id}/faqs` | JWT | List FAQs in a source |
-| POST | `/dashboard/sources/{source_id}/faqs` | JWT | Add a FAQ pair |
-| PUT | `/dashboard/sources/{source_id}/faqs/{faq_id}` | JWT | Update a FAQ |
-| DELETE | `/dashboard/sources/{source_id}/faqs/{faq_id}` | JWT | Delete a FAQ + its chunks |
-| POST | `/dashboard/sources/{source_id}/faqs/index` | JWT | Re-index all FAQs for search |
+| GET | `/api/dashboard/sources/{source_id}/faqs` | JWT | List FAQs in a source |
+| POST | `/api/dashboard/sources/{source_id}/faqs` | JWT | Add a FAQ pair |
+| PUT | `/api/dashboard/sources/{source_id}/faqs/{faq_id}` | JWT | Update a FAQ |
+| DELETE | `/api/dashboard/sources/{source_id}/faqs/{faq_id}` | JWT | Delete a FAQ + its chunks |
+| POST | `/api/dashboard/sources/{source_id}/faqs/index` | JWT | Re-index all FAQs for search |
 
 ### Text Documents
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
-| GET | `/dashboard/sources/{source_id}/docs` | JWT | List text documents in a source |
-| POST | `/dashboard/sources/{source_id}/docs` | JWT | Create a text document |
-| PUT | `/dashboard/sources/{source_id}/docs/{doc_id}` | JWT | Update a text document |
-| DELETE | `/dashboard/sources/{source_id}/docs/{doc_id}` | JWT | Delete a text document + its chunks |
-| POST | `/dashboard/sources/{source_id}/docs/index` | JWT | Re-index all text documents for search |
+| GET | `/api/dashboard/sources/{source_id}/docs` | JWT | List text documents in a source |
+| POST | `/api/dashboard/sources/{source_id}/docs` | JWT | Create a text document |
+| PUT | `/api/dashboard/sources/{source_id}/docs/{doc_id}` | JWT | Update a text document |
+| DELETE | `/api/dashboard/sources/{source_id}/docs/{doc_id}` | JWT | Delete a text document + its chunks |
+| POST | `/api/dashboard/sources/{source_id}/docs/index` | JWT | Re-index all text documents for search |
 
 ### Knowledge Gaps
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
-| GET | `/dashboard/knowledge/gaps` | JWT | List knowledge gaps (filter: status, gap_type) |
-| GET | `/dashboard/knowledge/gaps/stats` | JWT | Get gap stats + top unanswered questions |
-| POST | `/dashboard/knowledge/gaps/{gap_id}/resolve` | JWT | Resolve a gap (create_faq, dismiss, or merge) |
-| POST | `/dashboard/knowledge/gaps/cluster` | JWT | Re-cluster open gaps by vector similarity |
-| POST | `/dashboard/knowledge/gaps/cleanup` | JWT | Merge duplicate gaps with normalized text |
+| GET | `/api/dashboard/knowledge/gaps` | JWT | List knowledge gaps (filter: status, gap_type) |
+| GET | `/api/dashboard/knowledge/gaps/stats` | JWT | Get gap stats + top unanswered questions |
+| POST | `/api/dashboard/knowledge/gaps/{gap_id}/resolve` | JWT | Resolve a gap (create_faq, dismiss, or merge) |
+| POST | `/api/dashboard/knowledge/gaps/cluster` | JWT | Re-cluster open gaps by vector similarity |
+| POST | `/api/dashboard/knowledge/gaps/cleanup` | JWT | Merge duplicate gaps with normalized text |
 
 ### Leads
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
-| POST | `/leads` | API Key | Submit lead/enquiry form (supports dynamic fields) |
-| GET | `/dashboard/leads` | JWT | List all leads for tenant |
-| GET | `/lead-forms` | JWT | List all lead form configs for tenant |
-| POST | `/lead-forms` | JWT | Create a new lead form config |
-| PUT | `/lead-forms/{form_id}` | JWT | Update a lead form config |
-| DELETE | `/lead-forms/{form_id}` | JWT | Delete a lead form config |
-| GET | `/widget/lead-form` | API Key | Get active lead form config for widget |
+| POST | `/api/leads` | API Key | Submit lead/enquiry form (supports dynamic fields) |
+| GET | `/api/dashboard/leads` | JWT | List all leads for tenant |
+| GET | `/api/lead-forms` | JWT | List all lead form configs for tenant |
+| POST | `/api/lead-forms` | JWT | Create a new lead form config |
+| PUT | `/api/lead-forms/{form_id}` | JWT | Update a lead form config |
+| DELETE | `/api/lead-forms/{form_id}` | JWT | Delete a lead form config |
+| GET | `/api/widget/lead-form` | API Key | Get active lead form config for widget |
 
 ### System Admin
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
-| POST | `/admin/login` | None | Admin login (sets JWT cookie with role: admin) |
-| POST | `/admin/logout` | None | Clear admin auth cookie |
-| GET | `/admin/me` | JWT (admin) | Get admin info |
-| GET | `/admin/tenants` | JWT (admin) | List all tenants |
-| DELETE | `/admin/tenants/{tenant_id}` | JWT (admin) | Delete tenant + all associated data |
+| POST | `/api/admin/login` | None | Admin login (sets JWT cookie with role: admin) |
+| POST | `/api/admin/logout` | None | Clear admin auth cookie |
+| GET | `/api/admin/me` | JWT (admin) | Get admin info |
+| GET | `/api/admin/tenants` | JWT (admin) | List all tenants |
+| DELETE | `/api/admin/tenants/{tenant_id}` | JWT (admin) | Delete tenant + all associated data |
 
 ## Database Collections
 
