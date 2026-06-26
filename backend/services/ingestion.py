@@ -28,6 +28,7 @@ async def ingest_document(
     title: str = "Untitled",
     url: str = "",
     crawl_id: str = "",
+    min_content_length: int = 50,
 ) -> dict:
     """Ingest a document into the chunking/embedding/storage pipeline.
 
@@ -39,12 +40,13 @@ async def ingest_document(
         title: Document title
         url: Optional URL (for traceability)
         crawl_id: Optional crawl job ID (for website crawls, enables dedup)
+        min_content_length: Minimum content length to proceed (default 50, set to 0 for FAQ)
 
     Returns:
         dict with keys: indexed (bool), chunks_created (int), embedding_errors (int)
     """
     content = content.strip()
-    if not content or len(content) < 50:
+    if not content or len(content) < min_content_length:
         return {"indexed": False, "chunks_created": 0, "embedding_errors": 0}
 
     parent_splitter = MarkdownHeaderTextSplitter(
@@ -285,6 +287,7 @@ async def ingest_faq_pair(
         doc_id=doc_id,
         content=content,
         title=title,
+        min_content_length=0,
     )
 
     if not result["indexed"]:

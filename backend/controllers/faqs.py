@@ -38,6 +38,8 @@ async def list_faqs(
     await _verify_source(tenant_id, source_id)
 
     faqs = await faq_repo.get_by_source(tenant_id, source_id)
+    for faq in faqs:
+        faq.pop("_id", None)
     return faqs
 
 
@@ -88,6 +90,8 @@ async def update_faq(
         raise HTTPException(status_code=404, detail="FAQ not found")
 
     faq = await faq_repo.get_by_faq_id(tenant_id, source_id, faq_id)
+    if faq:
+        faq.pop("_id", None)
     return faq
 
 
@@ -170,6 +174,7 @@ async def _index_all_faqs(tenant_id: str, source_id: str):
                 content=text,
                 title=faq["question"][:80],
                 url=f"faq://{faq['faq_id']}",
+                min_content_length=0,
             )
             total_chunks += result["chunks_created"]
 

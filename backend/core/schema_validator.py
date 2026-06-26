@@ -82,7 +82,7 @@ COLLECTION_SCHEMAS = {
                     "job_id": {"bsonType": "string"},
                     "source_id": {"bsonType": "string"},
                     "job_type": {"enum": ["crawl", "pdf_index", "faq_index", "text_index"]},
-                    "status": {"enum": ["queued", "running", "done", "failed"]},
+                    "status": {"enum": ["queued", "running", "done", "failed", "purged"]},
                     "chunks_created": {"bsonType": "int"},
                     "embedding_errors": {"bsonType": "int"},
                     "pages_found": {"bsonType": "int"},
