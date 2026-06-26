@@ -60,6 +60,7 @@ async def list_sources(current_tenant: dict = Depends(get_current_tenant)):
     sources = await source_repo.get_by_tenant(tenant_id)
 
     for source in sources:
+        source.pop("_id", None)
         source["chunk_count"] = await db.chunks.count_documents({
             "tenant_id": tenant_id,
             "source_id": source["source_id"],
@@ -179,6 +180,7 @@ async def get_source(
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
 
+    source.pop("_id", None)
     source["chunk_count"] = await db.chunks.count_documents({
         "tenant_id": tenant_id,
         "source_id": source_id,
