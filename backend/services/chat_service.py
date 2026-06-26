@@ -498,12 +498,15 @@ class ChatService:
         sources = []
         seen_sources = set()
         for c in chunks:
+            url = c.get("url", "")
+            if not url.startswith("http://") and not url.startswith("https://"):
+                continue
             section_title = c.get("section_title")
             section_path = c.get("section_path")
-            source_key = (c["url"], section_path or section_title or "")
+            source_key = (url, section_path or section_title or "")
             if source_key not in seen_sources:
                 sources.append(ChatSource(
-                    url=c["url"],
+                    url=url,
                     title=c.get("title") or "Relevant Page",
                     section_title=section_title,
                     section_path=section_path,

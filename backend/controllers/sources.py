@@ -1,6 +1,6 @@
 import os
 import uuid
-import shutil
+import httpx
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File, Form
@@ -8,14 +8,13 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFi
 from core.auth import db, get_current_tenant
 from models.requests import SourceCreateRequest
 from views.responses import SourceCreateResponse
-from services.pdf_parser import extract_text_from_pdf
+from services.pdf_parser import extract_text_from_pdf, extract_text_from_pdf_from_bytes
 from services.ingestion import ingest_document
+from services.storage import upload_pdf as do_upload, get_presigned_url, delete_pdf as do_delete
 from repositories.source_repository import SourceRepository
 
 router = APIRouter(prefix="/dashboard/sources", tags=["sources"])
 source_repo = SourceRepository()
-
-UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
 
 
 def _to_iso(dt):
@@ -199,9 +198,11 @@ async def delete_source(
         raise HTTPException(status_code=404, detail="Source not found")
 
     config = source.get("config", {})
-    file_path = config.get("file_path", "")
-    if file_path and os.path.exists(file_path):
-        os.remove(file_path)
+    if source["source_type"] == "pdf":
+        try:
+            do_delete(tenant_id, source_id)
+        except Exception as e:
+            print(f"Failed to delete PDF from DO Spaces: {e}")
 
     await source_repo.delete(tenant_id, source_id)
     await _delete_source_data(tenant_id, source_id)
@@ -243,12 +244,18 @@ async def delete_crawl_source(
     return {"status": "deleted", "job_id": job_id}
 
 
-async def _index_pdf_background(tenant_id: str, source_id: str, file_path: str, name: str):
-    job_id = await _create_source_job(tenant_id, source_id, "pdf_index", {"file_path": file_path, "name": name})
+async def _index_pdf_background(tenant_id: str, source_id: str, name: str):
+    job_id = await _create_source_job(tenant_id, source_id, "pdf_index", {"name": name})
     await _update_source_job(job_id, {"status": "running", "started_at": datetime.now(timezone.utc)})
 
     try:
-        text = extract_text_from_pdf(file_path)
+        url = get_presigned_url(tenant_id, source_id, expires=1800)
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, timeout=60)
+            resp.raise_for_status()
+            pdf_bytes = resp.content
+
+        text = extract_text_from_pdf_from_bytes(pdf_bytes)
         if not text.strip():
             raise ValueError("No text could be extracted from the PDF")
 
@@ -259,7 +266,7 @@ async def _index_pdf_background(tenant_id: str, source_id: str, file_path: str, 
             doc_id=doc_id,
             content=text,
             title=name,
-            url=f"pdf://{os.path.basename(file_path)}",
+            url=f"pdf://{source_id}",
         )
 
         await source_repo.update(tenant_id, source_id, {
@@ -298,11 +305,13 @@ async def upload_pdf(
     tenant_id = current_tenant["tenant_id"]
     source_id = str(uuid.uuid4())
 
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-    ext = os.path.splitext(file.filename)[1]
-    file_path = os.path.join(UPLOAD_DIR, f"{source_id}{ext}")
-    with open(file_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+    file_bytes = await file.read()
+    if len(file_bytes) > 100 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File size exceeds 100MB limit")
+    try:
+        do_upload(tenant_id, source_id, file_bytes)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to upload PDF: {e}")
 
     source_doc = {
         "tenant_id": tenant_id,
@@ -310,7 +319,6 @@ async def upload_pdf(
         "source_type": "pdf",
         "name": name,
         "config": {
-            "file_path": file_path,
             "original_name": file.filename,
         },
         "status": "indexing",
@@ -320,7 +328,27 @@ async def upload_pdf(
     }
     await source_repo.create(source_doc)
 
-    background_tasks.add_task(_index_pdf_background, tenant_id, source_id, file_path, name)
+    background_tasks.add_task(_index_pdf_background, tenant_id, source_id, name)
 
     source_doc.pop("_id", None)
     return source_doc
+
+
+@router.get("/{source_id}/pdf_url")
+async def get_pdf_url(
+    source_id: str,
+    current_tenant: dict = Depends(get_current_tenant),
+):
+    tenant_id = current_tenant["tenant_id"]
+    source = await source_repo.get_by_source_id(tenant_id, source_id)
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+    if source["source_type"] != "pdf":
+        raise HTTPException(status_code=400, detail="Source is not a PDF")
+
+    try:
+        url = get_presigned_url(tenant_id, source_id, expires=3600)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate URL: {e}")
+
+    return {"url": url}

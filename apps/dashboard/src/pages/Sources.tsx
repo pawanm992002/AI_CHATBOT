@@ -17,7 +17,9 @@ import {
   Calendar,
   AlertTriangle,
   Database,
-  Lock
+  Lock,
+  X,
+  ExternalLink
 } from 'lucide-react';
 
 const TYPE_LABELS: Record<string, string> = {
@@ -99,6 +101,9 @@ const Sources = () => {
   const [showCreate, setShowCreate] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<Source | null>(null);
+  const [pdfViewerSource, setPdfViewerSource] = useState<Source | null>(null);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
   const { rbacError, triggerRbacError } = useRbacError();
 
   const isEditor = hasAccess(state.role, 'write');
@@ -192,11 +197,23 @@ const Sources = () => {
     }
   };
 
-  const handleSourceRowClick = (source: Source) => {
+  const handleSourceRowClick = async (source: Source) => {
     if (source.source_type === 'faq') {
       navigate(`/sources/faqs/${source.source_id}`);
     } else if (source.source_type === 'text') {
       navigate(`/sources/docs/${source.source_id}`);
+    } else if (source.source_type === 'pdf') {
+      setPdfViewerSource(source);
+      setPdfLoading(true);
+      try {
+        const res = await privateAxios.get(`/dashboard/sources/${source.source_id}/pdf_url`);
+        setPdfUrl(res.data.url);
+      } catch (err) {
+        console.error(err);
+        setPdfViewerSource(null);
+      } finally {
+        setPdfLoading(false);
+      }
     }
   };
 
@@ -333,7 +350,7 @@ const Sources = () => {
                 {items.map((source) => {
                   const isWebsite = source.source_type === 'website';
                   const displayName = isWebsite ? source.config?.seed_url : source.name;
-                  const canClick = source.source_type === 'faq' || source.source_type === 'text';
+                  const canClick = source.source_type === 'faq' || source.source_type === 'text' || source.source_type === 'pdf';
 
                   return (
                     <div
@@ -402,6 +419,55 @@ const Sources = () => {
           onConfirm={handleDelete}
           onCancel={() => setDeleteTarget(null)}
         />
+      )}
+
+      {pdfViewerSource && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+          <div className="w-full max-w-5xl h-[85vh] bg-slate-900 rounded-3xl border border-slate-800 shadow-2xl flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <FileText size={18} className="text-rose-400" />
+                <h3 className="text-sm font-bold text-white truncate max-w-md">{pdfViewerSource.name}</h3>
+              </div>
+              <div className="flex items-center gap-2">
+                {pdfUrl && (
+                  <a
+                    href={pdfUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+                  >
+                    <ExternalLink size={14} />
+                    <span>Open in new tab</span>
+                  </a>
+                )}
+                <button
+                  onClick={() => { setPdfViewerSource(null); setPdfUrl(null); }}
+                  className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-hidden">
+              {pdfLoading ? (
+                <div className="flex items-center justify-center h-full">
+                  <LoadingSpinner message="Loading PDF..." />
+                </div>
+              ) : pdfUrl ? (
+                <iframe
+                  src={pdfUrl}
+                  className="w-full h-full border-0"
+                  title={pdfViewerSource.name}
+                />
+              ) : (
+                <div className="flex items-center justify-center h-full text-slate-500 text-sm">
+                  Failed to load PDF
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

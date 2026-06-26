@@ -8,7 +8,8 @@
     "dev:dashboard": "pnpm --filter dashboard dev",
     "dev:widget": "pnpm --filter widget build --watch",
     "dev:backend": "uv run python -m uvicorn main:app --app-dir backend --reload",
-    "dev": "concurrently --kill-others \"pnpm dev:backend\" \"pnpm dev:dashboard\" \"pnpm dev:widget\"",
+    "dev:frontend": "concurrently --names \"DASH,WIDGET\" --prefix-colors \"blue,green\" \"pnpm dev:dashboard\" \"pnpm dev:widget\"",
+    "dev": "concurrently --kill-others-on-fail --names \"API,FRONTEND\" --prefix-colors \"red,blue\" \"pnpm dev:backend\" \"pnpm dev:frontend\"",
     "start": "pnpm dev:backend",
     "killbackend": "lsof -ti:8000 | xargs -r kill -9 && echo 'Backend killed'",
     "clean": "rm -rf node_modules apps/*/node_modules packages/*/node_modules apps/*/dist packages/*/dist .venv backend/.venv && find . -type d -name \"__pycache__\" -exec rm -rf {} + && pnpm store prune"

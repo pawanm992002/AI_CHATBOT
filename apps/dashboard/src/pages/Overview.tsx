@@ -231,17 +231,27 @@ const Overview = () => {
               </div>
             </div>
           ) : (
-            <div className="space-y-3">
-              <div className="flex flex-wrap gap-x-8 gap-y-1 text-xs text-slate-400">
-                <p>Business name: <strong className="text-white font-bold">{me.business_name || 'Not set'}</strong></p>
-                <p>Domain: <strong className="text-white font-bold">{me.domain}</strong></p>
-                {me.email && (
-                  <p>Email: <strong className="text-white font-bold">{me.email}</strong></p>
-                )}
+            <div className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <span className="text-xxs font-bold text-slate-500 uppercase tracking-wider">Business Name</span>
+                  <p className="text-xs text-white font-bold">{me.business_name || 'Not set'}</p>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-xxs font-bold text-slate-500 uppercase tracking-wider">Domain</span>
+                  <p className="text-xs text-white font-bold">{me.domain}</p>
+                </div>
               </div>
-              {me.description && (
-                <p className="text-xs text-slate-500 leading-relaxed">{me.description}</p>
-              )}
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <span className="text-xxs font-bold text-slate-500 uppercase tracking-wider">Email</span>
+                  <p className="text-xs text-white font-bold">{me.email || 'Not set'}</p>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <span className="text-xxs font-bold text-slate-500 uppercase tracking-wider">Business Description</span>
+                <p className="text-xs leading-relaxed text-white font-bold">{me.description || 'Not set'}</p>
+              </div>
             </div>
           )}
         </div>

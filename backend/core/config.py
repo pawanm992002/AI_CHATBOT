@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     APP_ENV: str = "development"
     MAX_CRAWL_PAGES: int = 100
     PUBLIC_URL: str = ""
+    DO_SPACES_BUCKET: str = ""
+    DO_SPACES_ACCESS_KEY: str = ""
+    DO_SPACES_SECRET_KEY: str = ""
+    DO_SPACES_ENDPOINT: str = ""
 
     model_config = SettingsConfigDict(
         env_file=env_file_path, 
