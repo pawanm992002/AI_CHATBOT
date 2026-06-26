@@ -1,17 +1,38 @@
 const DEFAULT_API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8000").replace(/\/$/, "");
 
+export interface LeadFormFieldConfig {
+  field_id: string;
+  label: string;
+  type: 'text' | 'email' | 'phone' | 'textarea' | 'select' | 'checkbox';
+  required: boolean;
+  placeholder?: string;
+  options?: string[];
+  order: number;
+}
+
+export interface LeadFormConfig {
+  form_id: string;
+  title: string;
+  fields: LeadFormFieldConfig[];
+  trigger_instructions: string;
+  enabled: boolean;
+}
+
 export interface WidgetConfig {
   theme?: string;
   suggested_questions?: string[];
   show_sources?: boolean;
+  lead_form?: LeadFormConfig | null;
 }
 
 export interface EnquiryData {
-  name: string;
-  email: string;
+  form_id?: string;
+  name?: string;
+  email?: string;
   phone?: string;
-  message: string;
+  message?: string;
   session_id: string;
+  custom_fields?: Record<string, string>;
 }
 
 function sha256Fallback(ascii: string): string {

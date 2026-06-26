@@ -48,6 +48,7 @@ class WidgetConfigResponse(BaseModel):
     theme: str
     suggested_questions: List[str]
     show_sources: bool = True
+    lead_form: Optional[dict] = None
 
 
 class FAQResponse(BaseModel):
@@ -133,6 +134,31 @@ class SettingsResponse(BaseModel):
     theme: str
     suggested_questions_manual: List[str] = []
     suggested_questions_auto: List[str] = []
+
+
+class LeadFormFieldResponse(BaseModel):
+    field_id: str
+    label: str
+    type: str
+    required: bool
+    placeholder: Optional[str] = None
+    options: Optional[List[str]] = None
+    order: int
+
+
+class LeadFormConfigResponse(BaseModel):
+    form_id: str
+    title: str
+    fields: List[LeadFormFieldResponse]
+    trigger_instructions: str
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class LeadSubmitResponse(BaseModel):
+    success: bool
+    message: str
 
 
 class OverviewStatsResponse(BaseModel):

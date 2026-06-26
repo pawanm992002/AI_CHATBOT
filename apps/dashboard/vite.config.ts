@@ -8,7 +8,7 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
-      '^/(tenants|admin|chat|static|ws|widget|leads|feedback|dashboard/(sources|crawl|knowledge|docs|leads))': {
+      '^/(tenants|admin|chat|static|ws|widget|leads|lead-forms|feedback|dashboard/(sources|crawl|knowledge|docs|leads))': {
         target: 'http://localhost:8000',
         changeOrigin: true,
         ws: true

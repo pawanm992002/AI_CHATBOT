@@ -50,7 +50,29 @@ export interface Lead {
   email: string;
   phone?: string;
   message: string;
+  form_id?: string;
+  custom_fields?: Record<string, string>;
   created_at: string;
+}
+
+export interface LeadFormField {
+  field_id: string;
+  label: string;
+  type: 'text' | 'email' | 'phone' | 'textarea' | 'select' | 'checkbox';
+  required: boolean;
+  placeholder?: string;
+  options?: string[];
+  order: number;
+}
+
+export interface LeadFormConfig {
+  form_id: string;
+  title: string;
+  fields: LeadFormField[];
+  trigger_instructions: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface KnowledgeGap {

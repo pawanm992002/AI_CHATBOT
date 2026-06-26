@@ -10,6 +10,7 @@ from core.redis import redis_client
 from services.embedder import openai_client
 from services.vector_search import search_chunks
 from views.responses import ChatSource
+from repositories.lead_repository import LeadFormConfigRepository
 
 from . import chat_prompts as prompts
 
@@ -17,6 +18,8 @@ from . import chat_prompts as prompts
 MAX_HISTORY = 50
 MAX_REWRITE_HISTORY = 12
 DIRECT_ANSWER_THRESHOLD = 0.5
+
+_form_config_repo = LeadFormConfigRepository()
 
 
 class QueryClass(StrEnum):
@@ -62,6 +65,16 @@ _DEVANAGARI_PATTERN = re.compile(r"[\u0900-\u097F]")
 
 
 class ChatService:
+    async def _get_enquiry_form_instruction(self, tenant_id: str) -> str:
+        """Get the enquiry form instruction for a tenant based on their lead form config."""
+        config = await _form_config_repo.get_enabled_for_tenant(tenant_id)
+        if not config:
+            return prompts.NO_ENQUIRY_FORM_INSTRUCTION
+        trigger = config.get("trigger_instructions", "").strip()
+        if trigger:
+            return f"However, if {trigger}, offer to help and at the end of your response append [ENQUIRY_FORM]. "
+        return prompts.DEFAULT_ENQUIRY_FORM_INSTRUCTION
+
     async def handle_message(self, turn: ChatTurnInput) -> ChatTurnResult:
         tenant_id = turn.tenant["tenant_id"]
         business_name = turn.tenant.get("business_name") or turn.tenant["domain"]
@@ -154,6 +167,7 @@ class ChatService:
     ) -> ChatTurnResult:
         business_name = turn.tenant.get("business_name") or turn.tenant["domain"]
         sources = self._build_sources(chunks)
+        enquiry_instruction = await self._get_enquiry_form_instruction(turn.tenant["tenant_id"])
 
         if needs_search:
             context_text = "\n\n".join([self._format_context_chunk(c) for c in chunks])
@@ -162,9 +176,13 @@ class ChatService:
                 current_url=turn.current_url,
                 current_page_title=turn.current_page_title,
                 context_text=context_text,
+                enquiry_form_instruction=enquiry_instruction,
             )
         else:
-            system_prompt = prompts.DIRECT_ANSWER_PROMPT.format(business_name=business_name)
+            system_prompt = prompts.DIRECT_ANSWER_PROMPT.format(
+                business_name=business_name,
+                enquiry_form_instruction=enquiry_instruction,
+            )
 
         if summary:
             system_prompt += f"\n\nHere is a summary of the conversation so far:\n{summary}"
@@ -232,8 +250,10 @@ class ChatService:
         except Exception:
             return query.strip()
 
-    def _build_no_match_prompt(self, turn: ChatTurnInput, summary: str, messages: list[dict], gap_type: str) -> str:
+    async def _build_no_match_prompt(self, turn: ChatTurnInput, summary: str, messages: list[dict], gap_type: str) -> str:
         business_name = turn.tenant.get("business_name") or turn.tenant["domain"]
+        enquiry_instruction = await self._get_enquiry_form_instruction(turn.tenant["tenant_id"])
+
         if self._is_contextual_followup(turn.query) and (summary or messages):
             conversation_text = self._recent_conversation_text(summary, messages, max_messages=30)
             return prompts.FOLLOWUP_NO_MATCH_PROMPT.format(
@@ -248,9 +268,13 @@ class ChatService:
             prompt = prompts.NO_MATCH_WITH_DESCRIPTION_PROMPT.format(
                 business_name=business_name,
                 description=description,
+                enquiry_form_instruction=enquiry_instruction,
             )
         else:
-            prompt = prompts.NO_MATCH_GENERIC_PROMPT.format(business_name=business_name)
+            prompt = prompts.NO_MATCH_GENERIC_PROMPT.format(
+                business_name=business_name,
+                enquiry_form_instruction=enquiry_instruction,
+            )
 
         if summary:
             prompt += f"\n\nHere is a summary of the conversation so far:\n{summary}"

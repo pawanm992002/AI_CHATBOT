@@ -77,3 +77,36 @@ class SettingsUpdateRequest(BaseModel):
     description: Optional[str] = None
     theme: Optional[str] = None
     suggested_questions_manual: Optional[List[str]] = None
+
+
+class LeadFormFieldInput(BaseModel):
+    label: str
+    type: str = Field(..., pattern=r"^(text|email|phone|textarea|select|checkbox)$")
+    required: bool = False
+    placeholder: Optional[str] = None
+    options: Optional[List[str]] = None
+    order: int = 0
+
+
+class LeadFormConfigCreateRequest(BaseModel):
+    title: str
+    fields: List[LeadFormFieldInput]
+    trigger_instructions: str = ""
+    enabled: bool = True
+
+
+class LeadFormConfigUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    fields: Optional[List[LeadFormFieldInput]] = None
+    trigger_instructions: Optional[str] = None
+    enabled: Optional[bool] = None
+
+
+class LeadSubmitRequest(BaseModel):
+    form_id: Optional[str] = None
+    name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    message: Optional[str] = None
+    session_id: str
+    custom_fields: Optional[dict] = None

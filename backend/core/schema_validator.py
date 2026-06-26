@@ -225,6 +225,8 @@ COLLECTION_SCHEMAS = {
                     "message": {"bsonType": "string"},
                     "raw_context": {"bsonType": "string"},
                     "source_url": {"bsonType": "string"},
+                    "form_id": {"bsonType": ["string", "null"]},
+                    "custom_fields": {"bsonType": ["object", "null"]},
                     "created_at": {"bsonType": "date"},
                 },
             }
@@ -311,6 +313,41 @@ COLLECTION_SCHEMAS = {
                     "message_id": {"bsonType": "string"},
                     "rating": {"enum": ["like", "dislike"]},
                     "created_at": {"bsonType": "date"},
+                },
+            }
+        },
+        "validationLevel": "moderate",
+        "validationAction": "error",
+    },
+    "lead_form_configs": {
+        "validator": {
+            "$jsonSchema": {
+                "bsonType": "object",
+                "required": ["form_id", "tenant_id", "title", "fields", "trigger_instructions", "enabled", "created_at", "updated_at"],
+                "properties": {
+                    "form_id": {"bsonType": "string"},
+                    "tenant_id": {"bsonType": "string"},
+                    "title": {"bsonType": "string"},
+                    "fields": {
+                        "bsonType": "array",
+                        "items": {
+                            "bsonType": "object",
+                            "required": ["field_id", "label", "type", "required", "order"],
+                            "properties": {
+                                "field_id": {"bsonType": "string"},
+                                "label": {"bsonType": "string"},
+                                "type": {"enum": ["text", "email", "phone", "textarea", "select", "checkbox"]},
+                                "required": {"bsonType": "bool"},
+                                "placeholder": {"bsonType": ["string", "null"]},
+                                "options": {"bsonType": ["array", "null"], "items": {"bsonType": "string"}},
+                                "order": {"bsonType": "int"},
+                            },
+                        },
+                    },
+                    "trigger_instructions": {"bsonType": "string"},
+                    "enabled": {"bsonType": "bool"},
+                    "created_at": {"bsonType": "date"},
+                    "updated_at": {"bsonType": "date"},
                 },
             }
         },

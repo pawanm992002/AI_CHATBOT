@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import { Message } from '@chatbot/shared';
 import { Palette } from '../utils/theme';
 import { EnquiryForm } from './EnquiryForm';
+import { LeadFormConfig } from '../api';
 import { SCROLL_INTO_VIEW_DELAY } from '../utils/constants';
 
 interface MessageListProps {
@@ -13,8 +14,9 @@ interface MessageListProps {
   palette: Palette;
   onSend: (text: string) => void;
   onFeedback: (msgIndex: number, rating: 'like' | 'dislike') => void;
-  onEnquirySubmit: (msgIndex: number, formData: { name: string; email: string; phone: string }) => void;
+  onEnquirySubmit: (msgIndex: number, formData: { custom_fields: Record<string, string>; form_id?: string }) => void;
   showSources: boolean;
+  leadFormConfig: LeadFormConfig | null;
 }
 
 export function MessageList({
@@ -27,6 +29,7 @@ export function MessageList({
   onFeedback,
   onEnquirySubmit,
   showSources,
+  leadFormConfig,
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -274,6 +277,7 @@ export function MessageList({
             <EnquiryForm
               accent={accent}
               palette={palette}
+              formConfig={leadFormConfig}
               onSubmit={(formData) => onEnquirySubmit(i, formData)}
             />
           )}

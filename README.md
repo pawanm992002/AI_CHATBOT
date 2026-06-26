@@ -260,6 +260,8 @@ The backend creates MongoDB indexes on startup for efficient queries:
 | `faqs` | `(tenant_id, source_id, faq_id)` | Compound |
 | `documents` | `(tenant_id, source_id, doc_id)` | Compound |
 | `leads` | `(tenant_id, created_at DESC)` | Compound |
+| `lead_form_configs` | `(tenant_id, form_id)` | Compound |
+| `lead_form_configs` | `(tenant_id, enabled)` | Compound |
 | `knowledge_gaps` | `(tenant_id, status)` | Compound |
 | `knowledge_gaps` | `(tenant_id, cluster_id)` | Compound |
 | `source_jobs` | `(tenant_id, source_id, started_at DESC)` | Compound |
@@ -639,25 +641,63 @@ All endpoints require JWT authentication (`Authorization: Bearer <token>`).
 
 ## Lead Generation (Enquiry Form)
 
-When a website visitor asks about pricing, demo, purchasing, or wants to be contacted, GPT-4o detects the intent and appends `[ENQUIRY_FORM]` to its response. The backend strips the marker and returns `show_enquiry_form: true`. The widget renders an inline form (Name, Email, Phone).
+The platform includes a **dynamic lead form builder** that lets tenants create custom lead capture forms with configurable fields, validation, and trigger instructions.
+
+### How It Works
+
+1. **Form Builder** (Dashboard) — Tenants create lead forms via **Leads → Form Builder** tab. They can:
+   - Add any number of fields (text, email, phone, textarea, dropdown, checkbox)
+   - Mark fields as required or optional
+   - Set custom labels and placeholders
+   - Configure **trigger instructions** — natural language rules telling the AI when to show the form
+   - Enable/disable the form entirely
+
+2. **Widget Rendering** — On load, the widget fetches the active form config from `GET /widget/lead-form`. When the LLM detects lead intent, it appends `[ENQUIRY_FORM]` to its response. The widget renders the dynamic form based on the config.
+
+3. **Lead Storage** — On form submit, all field values are stored as `custom_fields` (a flexible `Record<string, string>`), along with the AI-summarized conversation context.
 
 ### Flow
 
 ```
-Visitor: "How much does this cost?"
-  → GPT-4o detects lead intent, appends [ENQUIRY_FORM]
+Tenant: Configures form in Dashboard → Form Builder tab
+  → Sets fields (name, email, company, budget, etc.)
+  → Sets trigger: "the user is asking about pricing, demo, or wants a consultation"
+  → Saves form config to MongoDB
+
+Visitor: "Can I get a quote for 50 users?"
+  → GPT-4o detects lead intent (based on tenant's trigger instructions)
+  → Appends [ENQUIRY_FORM] to response
   → Backend strips marker, returns show_enquiry_form: true
-  → Widget shows answer + inline form
-  → Visitor fills form → POST /leads → saved to MongoDB
-  → gpt-4o-mini summarizes conversation context into 1-2 sentences
+  → Widget fetches form config, renders dynamic form
+  → Visitor fills form → POST /leads → saved to MongoDB with custom_fields
   → Dashboard "Leads" page lists all submissions
 ```
 
+### Form Builder Features
+
+| Feature | Description |
+|---|---|
+| **Field Types** | Text, Email, Phone, Textarea, Dropdown (select), Checkbox |
+| **Required/Optional** | Toggle per-field validation |
+| **Custom Labels** | Any label (e.g., "Company Name", "Budget Range") |
+| **Placeholder Text** | Custom placeholder per field |
+| **Dropdown Options** | Configurable options for select fields |
+| **Field Ordering** | Drag to reorder fields |
+| **Trigger Instructions** | Natural language rules for when to show the form |
+| **Enable/Disable** | Toggle form on/off without deleting |
+| **Backward Compatible** | Falls back to default 3-field form if no config exists |
+
 ### Key Details
-- **Intent detection**: Done by GPT-4o in the system prompt, not keyword matching. Works across greeting, RAG, and no-results paths.
-- **Conversation summarization**: On form submit, `gpt-4o-mini` summarizes the last 3 turns of conversation into a concise description of what the lead was interested in. Raw context is also preserved (`raw_context` field).
-- **No LLM call for irrelevant queries**: "Who is Virat Kohli?" gets classified as `OUT_OF_SCOPE` by the query evaluator and returns immediately — no GPT-4o call, no token waste.
-- **Dashboard**: "Leads" nav item with a table showing Name, Email, Phone, Date, and the summarized message.
+- **Intent detection**: Done by GPT-4o using the tenant's custom trigger instructions. Works across greeting, RAG, and no-results paths.
+- **Custom trigger instructions**: Tenants write natural language rules like "the user is asking about pricing, demo, or wants a consultation" — the AI uses these to decide when to show the form.
+- **Conversation summarization**: On form submit, `gpt-4o-mini` summarizes the conversation context into a concise description of what the lead was interested in. Raw context is also preserved (`raw_context` field).
+- **Dynamic field storage**: All custom field values are stored in `custom_fields` as a flat key-value map, making it flexible for any form configuration.
+
+### Dashboard UI
+
+Navigate to **Leads** in the sidebar:
+- **View Leads tab** — Table of all submissions with Name, Email, Phone, Message, Date
+- **Form Builder tab** — Create and configure lead forms with a visual builder
 
 ### Guardrails
 
@@ -788,7 +828,7 @@ The embeddable chat widget (`apps/widget/`) is built as a self-executing IIFE bu
 - **WebSocket streaming** — Real-time token-by-token responses via `/ws/chat`
 - **Chat history persistence** — Stored in `sessionStorage` with 24-hour expiry
 - **Session management** — `chat_session_id` cookie for conversation continuity
-- **Enquiry form** — Inline lead capture when GPT detects purchase intent
+- **Enquiry form** — Dynamic lead capture form (configurable via dashboard Form Builder)
 - **Like/dislike feedback** — Thumbs-up/down on every AI response
 - **Suggested questions** — Clickable chips shown on empty chat
 - **Source citations** — Toggleable per-tenant via `show_sources` setting
@@ -828,7 +868,7 @@ The embeddable chat widget (`apps/widget/`) is built as a self-executing IIFE bu
 ### Widget & Chat
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
-| GET | `/widget/config` | API Key | Get widget config (theme + suggested questions) |
+| GET | `/widget/config` | API Key | Get widget config (theme, suggested questions, lead form) |
 | POST | `/chat` | API Key | Chat with the widget (returns `message_id`) |
 | POST | `/feedback` | API Key | Submit like/dislike feedback for a message |
 | WS | `/ws/chat?key_hash=...` | WebSocket + SHA-256 key hash | WebSocket streaming chat |
@@ -906,8 +946,13 @@ The embeddable chat widget (`apps/widget/`) is built as a self-executing IIFE bu
 ### Leads
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
-| POST | `/leads` | API Key | Submit lead/enquiry form |
+| POST | `/leads` | API Key | Submit lead/enquiry form (supports dynamic fields) |
 | GET | `/dashboard/leads` | JWT | List all leads for tenant |
+| GET | `/lead-forms` | JWT | List all lead form configs for tenant |
+| POST | `/lead-forms` | JWT | Create a new lead form config |
+| PUT | `/lead-forms/{form_id}` | JWT | Update a lead form config |
+| DELETE | `/lead-forms/{form_id}` | JWT | Delete a lead form config |
+| GET | `/widget/lead-form` | API Key | Get active lead form config for widget |
 
 ### System Admin
 | Method | Endpoint | Auth | Description |
@@ -933,6 +978,7 @@ The embeddable chat widget (`apps/widget/`) is built as a self-executing IIFE bu
 | `visitors` | Visitor tracking (IP, page views, messages) |
 | `faqs` | FAQ Q&A pairs |
 | `documents` | Text document content |
-| `leads` | Enquiry form submissions |
+| `leads` | Enquiry form submissions (includes `custom_fields` for dynamic form data) |
+| `lead_form_configs` | Lead form configurations (fields, trigger instructions, enabled status) |
 | `message_feedback` | Like/dislike feedback on AI responses |
 | `knowledge_gaps` | Unanswered queries with embeddings, gap_type, and similarity clustering |

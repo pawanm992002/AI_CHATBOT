@@ -9,10 +9,12 @@ from core.config import settings
 from models.requests import ChatRequest, FeedbackRequest
 from services.chat_service import ChatService, ChatTurnInput
 from views.responses import ChatResponse, ChatSource, WidgetConfigResponse
+from repositories.lead_repository import LeadFormConfigRepository
 
 
 router = APIRouter(tags=["chat"])
 chat_service = ChatService()
+_form_config_repo = LeadFormConfigRepository()
 
 MAX_QUERY_LENGTH = 500
 PER_TENANT_RATE_LIMIT = 100
@@ -28,10 +30,24 @@ async def get_widget_config(current_tenant: dict = Depends(verify_api_key)):
     manual = current_tenant.get("suggested_questions_manual", [])
     auto = current_tenant.get("suggested_questions_auto", [])
     suggested = manual if manual else auto
+
+    # Get active lead form config
+    lead_form_config = await _form_config_repo.get_enabled_for_tenant(current_tenant["tenant_id"])
+    lead_form = None
+    if lead_form_config:
+        lead_form = {
+            "form_id": lead_form_config["form_id"],
+            "title": lead_form_config["title"],
+            "fields": lead_form_config.get("fields", []),
+            "trigger_instructions": lead_form_config.get("trigger_instructions", ""),
+            "enabled": lead_form_config.get("enabled", True),
+        }
+
     return {
         "theme": current_tenant.get("theme", "default"),
         "suggested_questions": suggested,
         "show_sources": current_tenant.get("show_sources", True),
+        "lead_form": lead_form,
     }
 
 

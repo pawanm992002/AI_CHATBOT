@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo, CSSProperties } from 'react';
-import { submitEnquiry, getWidgetConfig, submitFeedback, apiClient } from './api';
+import { submitEnquiry, getWidgetConfig, submitFeedback, apiClient, LeadFormConfig } from './api';
 import { WidgetProps, Message, useIsMobile, useStyleInjection } from '@chatbot/shared';
 import { getPalette } from './utils/theme';
 import { useHostTheme } from './hooks/useHostTheme';
@@ -42,6 +42,7 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
   const [isLoading, setIsLoading] = useState(false);
   const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([]);
   const [showSources, setShowSources] = useState<boolean>(true);
+  const [leadFormConfig, setLeadFormConfig] = useState<LeadFormConfig | null>(null);
   const [isDisabled, setIsDisabled] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -68,6 +69,9 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
         if (config?.suggested_questions) setSuggestedQuestions(config.suggested_questions);
         if (config && typeof config.show_sources === 'boolean') {
           setShowSources(config.show_sources);
+        }
+        if (config?.lead_form) {
+          setLeadFormConfig(config.lead_form);
         }
       } catch (err: any) {
         console.error("Failed to fetch widget config", err);
@@ -303,7 +307,7 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
     }
   }, [clearEnquiryForms, getWs]);
 
-  const handleEnquirySubmit = useCallback(async (msgIndex: number, formData: { name: string; email: string; phone: string }) => {
+  const handleEnquirySubmit = useCallback(async (msgIndex: number, formData: { custom_fields: Record<string, string>; form_id?: string }) => {
     const contextMessages = messages.slice(Math.max(0, msgIndex - 5), msgIndex + 1);
     const contextText = contextMessages
       .map(m => `${m.role === 'user' ? 'Visitor' : 'Bot'}: ${m.content}`)
@@ -311,9 +315,8 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
 
     try {
       await submitEnquiry({
-        name: formData.name.trim(),
-        email: formData.email.trim(),
-        phone: formData.phone.trim(),
+        form_id: formData.form_id,
+        custom_fields: formData.custom_fields,
         message: contextText,
         session_id: getSessionId(),
       });
@@ -448,6 +451,7 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
                     onFeedback={handleFeedback}
                     onEnquirySubmit={handleEnquirySubmit}
                     showSources={showSources}
+                    leadFormConfig={leadFormConfig}
                   />
 
                   <div ref={messagesEndRef} />
