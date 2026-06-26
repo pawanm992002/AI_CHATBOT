@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { privateAxios } from '../utils/axios';
 import { useStore, hasAccess } from '../store';
-import { 
-  Database, 
-  Layers, 
-  HelpCircle, 
-  MessageSquare, 
+import {
+  Database,
+  Layers,
+  HelpCircle,
+  MessageSquare,
   TrendingUp,
   CheckCircle,
   Chrome,
@@ -87,31 +87,31 @@ const Overview = () => {
 
   // Dark Theme KPIs
   const kpis = [
-    { 
-      label: 'Knowledge Sources', 
-      val: tenantStats?.knowledge_sources ?? '-', 
-      sub: 'Websites, PDFs, FAQs, Docs', 
+    {
+      label: 'Knowledge Sources',
+      val: tenantStats?.knowledge_sources ?? '-',
+      sub: 'Websites, PDFs, FAQs, Docs',
       icon: Database,
       color: 'bg-violet-950/40 text-violet-400 border border-violet-900/40'
     },
-    { 
-      label: 'Pages Crawled', 
-      val: tenantStats?.pages_crawled ?? '-', 
-      sub: 'Across all websites', 
+    {
+      label: 'Pages Crawled',
+      val: tenantStats?.pages_crawled ?? '-',
+      sub: 'Across all websites',
       icon: Chrome,
       color: 'bg-blue-950/40 text-blue-400 border border-blue-900/40'
     },
-    { 
-      label: 'Chunks Indexed', 
-      val: tenantStats?.chunks_indexed ?? '-', 
-      sub: 'Searchable vectors', 
+    {
+      label: 'Chunks Indexed',
+      val: tenantStats?.chunks_indexed ?? '-',
+      sub: 'Searchable vectors',
       icon: Layers,
       color: 'bg-indigo-950/40 text-indigo-400 border border-indigo-900/40'
     },
-    { 
-      label: 'Queries This Month', 
-      val: tenantStats?.queries_this_month ?? '-', 
-      sub: 'Total chat sessions', 
+    {
+      label: 'Queries This Month',
+      val: tenantStats?.queries_this_month ?? '-',
+      sub: 'Total chat sessions',
       icon: MessageSquare,
       color: 'bg-teal-950/40 text-teal-400 border border-teal-900/40'
     },
@@ -127,7 +127,7 @@ const Overview = () => {
         </div>
         <div className="flex items-center gap-3 mt-4 sm:mt-0">
           <a
-            href="/tenants/test"
+            href="/api/tenants/test"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-2 px-4 py-2.5 bg-teal-600 text-sm font-semibold text-white rounded-xl shadow-sm hover:bg-teal-700 transition-colors"

@@ -115,7 +115,7 @@ const Settings = () => {
 
   const widgetUrl = window.location.origin;
   const snippet = `<script src="${widgetUrl}/static/widget.js" data-api-key="${me.api_key}"></script>`;
-  const testUrl = `${widgetUrl}/tenants/test`;
+  const testUrl = `${widgetUrl}/api/tenants/test`;
 
   const openTestPage = () => {
     window.open(testUrl, '_blank', 'noopener,noreferrer');

@@ -79,69 +79,84 @@ async def root():
 
 @app.on_event("startup")
 async def backfill_tenant_statuses():
-    result = await db.tenants.update_many(
-        {"status": {"$exists": False}},
-        {"$set": {"status": "approved"}}
-    )
-    if result.modified_count:
-        print(f"Backfilled status for {result.modified_count} existing tenant(s)")
+    try:
+        result = await db.tenants.update_many(
+            {"status": {"$exists": False}},
+            {"$set": {"status": "approved"}}
+        )
+        if result.modified_count:
+            print(f"Backfilled status for {result.modified_count} existing tenant(s)")
+    except Exception as e:
+        print(f"Startup: backfill_tenant_statuses failed: {e}")
 
 
 @app.on_event("startup")
 async def apply_db_schemas():
-    from core.schema_validator import ensure_schemas
-    await ensure_schemas()
+    try:
+        from core.schema_validator import ensure_schemas
+        await ensure_schemas()
+    except Exception as e:
+        print(f"Startup: apply_db_schemas failed: {e}")
 
 
 @app.on_event("startup")
 async def cleanup_stale_jobs():
-    from datetime import datetime, timezone
-    from repositories.crawl_job_repository import CrawlJobRepository
-    repo = CrawlJobRepository()
-    modified = await repo.mark_stale_running_as_failed()
-    if modified:
-        print(f"Cleaned up {modified} stale crawl job(s)")
+    try:
+        from datetime import datetime, timezone
+        from repositories.crawl_job_repository import CrawlJobRepository
+        repo = CrawlJobRepository()
+        modified = await repo.mark_stale_running_as_failed()
+        if modified:
+            print(f"Cleaned up {modified} stale crawl job(s)")
+    except Exception as e:
+        print(f"Startup: cleanup_stale_jobs failed: {e}")
 
 
 @app.on_event("startup")
 async def backfill_api_key_hashes():
-    from core.auth import hash_api_key
-    cursor = db.tenants.find({"api_key_hash": {"$exists": False}}, {"tenant_id": 1, "api_key": 1})
-    count = 0
-    async for tenant in cursor:
-        await db.tenants.update_one(
-            {"_id": tenant["_id"]},
-            {"$set": {"api_key_hash": hash_api_key(tenant["api_key"])}}
-        )
-        count += 1
-    if count:
-        print(f"Backfilled api_key_hash for {count} existing tenant(s)")
+    try:
+        from core.auth import hash_api_key
+        cursor = db.tenants.find({"api_key_hash": {"$exists": False}}, {"tenant_id": 1, "api_key": 1})
+        count = 0
+        async for tenant in cursor:
+            await db.tenants.update_one(
+                {"_id": tenant["_id"]},
+                {"$set": {"api_key_hash": hash_api_key(tenant["api_key"])}}
+            )
+            count += 1
+        if count:
+            print(f"Backfilled api_key_hash for {count} existing tenant(s)")
+    except Exception as e:
+        print(f"Startup: backfill_api_key_hashes failed: {e}")
 
 
 @app.on_event("startup")
 async def ensure_lookup_indexes():
-    await db.parents.create_index([("tenant_id", 1), ("parent_id", 1)])
-    await db.parents.create_index([("tenant_id", 1), ("source_id", 1)])
-    await db.chunks.create_index([("tenant_id", 1), ("parent_id", 1), ("child_index", 1)])
-    await db.chunks.create_index([("tenant_id", 1), ("source_id", 1)])
-    await db.pages.create_index([("tenant_id", 1), ("url", 1)])
-    await db.pages.create_index([("tenant_id", 1), ("source_id", 1)])
-    await db.visitors.create_index("session_id")
-    await db.tenants.create_index("tenant_id", unique=True)
-    await db.tenants.create_index("api_key", unique=True)
-    await db.tenants.create_index("domain")
-    await db.conversations.create_index("session_id")
-    await db.crawl_jobs.create_index([("job_id", 1), ("tenant_id", 1)])
-    await db.sources.create_index([("tenant_id", 1), ("source_id", 1)])
-    await db.faqs.create_index([("tenant_id", 1), ("source_id", 1), ("faq_id", 1)])
-    await db.documents.create_index([("tenant_id", 1), ("source_id", 1), ("doc_id", 1)])
-    await db.leads.create_index([("tenant_id", 1), ("created_at", -1)])
-    await db.knowledge_gaps.create_index([("tenant_id", 1), ("status", 1)])
-    await db.knowledge_gaps.create_index([("tenant_id", 1), ("cluster_id", 1)])
-    await db.source_jobs.create_index([("tenant_id", 1), ("source_id", 1), ("started_at", -1)])
-    await db.source_jobs.create_index([("tenant_id", 1), ("job_type", 1)])
-    await db.lead_form_configs.create_index([("tenant_id", 1), ("form_id", 1)])
-    await db.lead_form_configs.create_index([("tenant_id", 1), ("enabled", 1)])
+    try:
+        await db.parents.create_index([("tenant_id", 1), ("parent_id", 1)])
+        await db.parents.create_index([("tenant_id", 1), ("source_id", 1)])
+        await db.chunks.create_index([("tenant_id", 1), ("parent_id", 1), ("child_index", 1)])
+        await db.chunks.create_index([("tenant_id", 1), ("source_id", 1)])
+        await db.pages.create_index([("tenant_id", 1), ("url", 1)])
+        await db.pages.create_index([("tenant_id", 1), ("source_id", 1)])
+        await db.visitors.create_index("session_id")
+        await db.tenants.create_index("tenant_id", unique=True)
+        await db.tenants.create_index("api_key", unique=True)
+        await db.tenants.create_index("domain")
+        await db.conversations.create_index("session_id")
+        await db.crawl_jobs.create_index([("job_id", 1), ("tenant_id", 1)])
+        await db.sources.create_index([("tenant_id", 1), ("source_id", 1)])
+        await db.faqs.create_index([("tenant_id", 1), ("source_id", 1), ("faq_id", 1)])
+        await db.documents.create_index([("tenant_id", 1), ("source_id", 1), ("doc_id", 1)])
+        await db.leads.create_index([("tenant_id", 1), ("created_at", -1)])
+        await db.knowledge_gaps.create_index([("tenant_id", 1), ("status", 1)])
+        await db.knowledge_gaps.create_index([("tenant_id", 1), ("cluster_id", 1)])
+        await db.source_jobs.create_index([("tenant_id", 1), ("source_id", 1), ("started_at", -1)])
+        await db.source_jobs.create_index([("tenant_id", 1), ("job_type", 1)])
+        await db.lead_form_configs.create_index([("tenant_id", 1), ("form_id", 1)])
+        await db.lead_form_configs.create_index([("tenant_id", 1), ("enabled", 1)])
+    except Exception as e:
+        print(f"Startup: ensure_lookup_indexes failed: {e}")
 
 
 @app.on_event("shutdown")
