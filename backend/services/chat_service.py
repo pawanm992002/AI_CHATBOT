@@ -101,6 +101,7 @@ class ChatService:
             f"{forms_text}\n"
             f"If the user's message matches any form's trigger, offer to help and append [ENQUIRY_FORM:form_id] at the end of your response. "
             f"Replace form_id with the actual form_id of the best matching form. "
+            f"Always use the exact format [ENQUIRY_FORM:form_id] — do NOT use any other marker name. "
             f"If none match, do NOT append anything.\n"
         )
 
@@ -230,10 +231,12 @@ class ChatService:
 
         full_answer = ""
         show_form = False
+        form_id = ""
         async for item in self._complete_answer_stream(system_prompt, messages, tenant_ai_provider, tenant_ai_model):
             if isinstance(item, dict):
                 full_answer = item["answer"]
                 show_form = item["show_form"]
+                form_id = item["form_id"]
             else:
                 full_answer += item
                 await on_token(item)
@@ -245,7 +248,7 @@ class ChatService:
         if not show_form:
             await self._log_knowledge_gap(tenant_id, turn.query, turn.current_url, gap_type, turn.message_id)
 
-        return ChatTurnResult(message_id=turn.message_id, answer=full_answer, sources=[], show_enquiry_form=show_form)
+        return ChatTurnResult(message_id=turn.message_id, answer=full_answer, sources=[], show_enquiry_form=show_form, enquiry_form_id=form_id)
 
     async def _handle_answer_with_chunks_stream(self, turn, summary, messages, chunks, needs_search, on_token):
         """Streaming version of _handle_answer_with_chunks."""
@@ -276,10 +279,12 @@ class ChatService:
 
         full_answer = ""
         show_form = False
+        form_id = ""
         async for item in self._complete_answer_stream(system_prompt, messages, tenant_ai_provider, tenant_ai_model):
             if isinstance(item, dict):
                 full_answer = item["answer"]
                 show_form = item["show_form"]
+                form_id = item["form_id"]
             else:
                 full_answer += item
                 await on_token(item)
@@ -289,7 +294,7 @@ class ChatService:
         await self._persist_conversation(turn, summary, messages)
         await self._track_visitor_message(turn.session_id)
 
-        return ChatTurnResult(message_id=turn.message_id, answer=full_answer, sources=sources, show_enquiry_form=show_form)
+        return ChatTurnResult(message_id=turn.message_id, answer=full_answer, sources=sources, show_enquiry_form=show_form, enquiry_form_id=form_id)
 
     async def _handle_no_chunks(
         self,
@@ -318,7 +323,7 @@ class ChatService:
         if not show_form:
             await self._log_knowledge_gap(tenant_id, turn.query, turn.current_url, gap_type, turn.message_id)
 
-        return ChatTurnResult(message_id=turn.message_id, answer=answer, sources=[], show_enquiry_form=show_form)
+        return ChatTurnResult(message_id=turn.message_id, answer=answer, sources=[], show_enquiry_form=show_form, enquiry_form_id=form_id)
 
     async def _handle_answer_with_chunks(
         self,
@@ -442,16 +447,16 @@ class ChatService:
 
     @staticmethod
     def _parse_enquiry_marker(text: str) -> tuple[bool, str]:
-        """Parse [ENQUIRY_FORM] or [ENQUIRY_FORM:form_id] from text."""
-        match = re.search(r'\[ENQUIRY_FORM(?::([^\]]+))?\]', text)
+        """Parse [ENQUIRY_FORM], [ENQUIRY_FORM:form_id], or [XXX_FORM:form_id] variants."""
+        match = re.search(r'\[(\w+_FORM)(?::\s*([^\]\s]+))?\s*\]?', text)
         if match:
-            return True, match.group(1) or ""
+            return True, (match.group(2) or "").strip()
         return False, ""
 
     @staticmethod
     def _strip_enquiry_marker(text: str) -> str:
-        """Remove all [ENQUIRY_FORM] and [ENQUIRY_FORM:...] markers from text."""
-        return re.sub(r'\s*\[ENQUIRY_FORM(?:[^\]]*)?\]\s*', '', text).strip()
+        """Remove all enquiry/form marker variants including those missing closing bracket."""
+        return re.sub(r'\s*\[\w+_FORM(?::\s*[^\]\s]*)?\]?\s*', ' ', text).strip()
 
     async def _complete_answer(self, system_prompt: str, messages: list[dict], provider: str = "openai", model: str = "gpt-4o") -> tuple[str, bool, str]:
         api_messages = [{"role": "system", "content": system_prompt}] + messages[-MAX_HISTORY:]
@@ -473,12 +478,10 @@ class ChatService:
         async for token in llm.astream(api_messages):
             full_answer += token
             show_form, form_id = self._parse_enquiry_marker(full_answer)
-            # Only yield if no enquiry form marker yet (avoid streaming the marker)
             if not show_form:
                 yield token
-        if show_form:
-            full_answer = self._strip_enquiry_marker(full_answer)
-        yield {"answer": full_answer, "show_form": show_form, "form_id": form_id}
+        clean_answer = self._strip_enquiry_marker(full_answer) if show_form else full_answer
+        yield {"answer": clean_answer, "show_form": show_form, "form_id": form_id}
 
     async def _load_conversation_context(self, session_id: str) -> tuple[str, list[dict]]:
         cache_key = get_redis_key(f"chat_session:{session_id}")

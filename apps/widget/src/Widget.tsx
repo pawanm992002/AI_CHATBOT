@@ -247,7 +247,8 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
               const updated = [...prev];
               const idx = updated.length - 1;
               if (updated[idx].role === 'assistant') {
-                updated[idx] = { ...updated[idx], messageId: data.message_id, isStreaming: false };
+                const cleanAnswer = data.answer || updated[idx].content;
+                updated[idx] = { ...updated[idx], content: cleanAnswer, messageId: data.message_id, isStreaming: false };
               }
               return updated;
             });
