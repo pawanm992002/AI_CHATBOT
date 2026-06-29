@@ -14,6 +14,12 @@ router = APIRouter(tags=["chat"])
 chat_service = ChatService()
 _form_config_repo = LeadFormConfigRepository()
 
+
+def _client_ip(request: Request) -> str:
+    if request.client:
+        return request.client.host
+    return request.headers.get("x-forwarded-for", "0.0.0.0").split(",")[0].strip()
+
 MAX_QUERY_LENGTH = 500
 PER_TENANT_RATE_LIMIT = 100
 PER_SESSION_RATE_LIMIT = 20
