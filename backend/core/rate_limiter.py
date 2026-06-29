@@ -1,7 +1,7 @@
 import time
 import uuid
 from fastapi import Request, HTTPException, status
-from core.redis import redis_client
+from core.redis import redis_client, get_redis_key
 
 def get_client_ip(request: Request) -> str:
     """Safely retrieve the client IP from the request headers or client connection info."""
@@ -14,6 +14,7 @@ async def check_rate_limit(key: str, limit: int, window: int) -> bool:
     Returns True if the rate limit is exceeded, False otherwise.
     Uses Redis sorted set (ZSET) for a sliding window rate limiter.
     """
+    key = get_redis_key(key)
     now = time.time()
     cutoff = now - window
     # We append a unique identifier (UUID) to handle multiple requests at the exact same millisecond/microsecond
