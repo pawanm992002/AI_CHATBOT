@@ -12,6 +12,7 @@ import secrets
 from datetime import datetime, timezone
 
 router = APIRouter(prefix="/tenants", tags=["tenants"])
+test_router = APIRouter(tags=["test"])
 tenant_repo = TenantRepository()
 
 _DEFAULT_AI = {"provider": "openai", "model": "gpt-4o-mini"}
@@ -193,8 +194,8 @@ async def get_feedback_analytics(current_tenant: dict = Depends(get_current_tena
     }
 
 
-@router.get("/test", response_class=HTMLResponse)
-async def test_chatbot(current_tenant: dict = Depends(get_current_tenant)):
+@test_router.get("/{business_name_slug}/test", response_class=HTMLResponse)
+async def test_chatbot(business_name_slug: str, current_tenant: dict = Depends(get_current_tenant)):
     """Serve a standalone test page with the widget pre-configured with tenant's API key."""
     template_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates", "test_page.html")
     with open(template_path) as f:
@@ -202,6 +203,7 @@ async def test_chatbot(current_tenant: dict = Depends(get_current_tenant)):
 
     html = template.safe_substitute(
         business_name=current_tenant.get("business_name") or current_tenant["domain"],
+        domain=current_tenant.get("domain") or "localhost",
         api_key=current_tenant["api_key"],
         api_base_url=current_tenant.get("api_base_url") or "",
     )

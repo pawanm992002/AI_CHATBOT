@@ -41,6 +41,7 @@ class CORSRreflectMiddleware(BaseHTTPMiddleware):
 app.add_middleware(CORSRreflectMiddleware)
 
 app.include_router(tenants.router, prefix="/api")
+app.include_router(tenants.test_router)
 app.include_router(crawl.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
 app.include_router(sources.router, prefix="/api")

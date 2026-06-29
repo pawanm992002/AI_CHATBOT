@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { privateAxios } from '../utils/axios';
 import { LeadFormConfig, LeadFormField } from '../interfaces';
 import {
@@ -29,28 +29,44 @@ const FIELD_TYPES: { value: LeadFormField['type']; label: string; icon: typeof T
   { value: 'checkbox', label: 'Checkbox', icon: CheckSquare },
 ];
 
+const DEFAULT_FIELDS: LeadFormField[] = [
+  { field_id: '', label: 'Your Name', type: 'text', required: true, placeholder: 'Your Name', order: 0 },
+  { field_id: '', label: 'Your Email', type: 'email', required: true, placeholder: 'Your Email', order: 1 },
+  { field_id: '', label: 'Phone', type: 'phone', required: false, placeholder: 'Phone (optional)', order: 2 },
+];
+
 interface LeadFormBuilderProps {
   existingForms: LeadFormConfig[];
-  onSaved: () => void;
+  selectedFormId: string | null;
+  onSaved: (newFormId?: string) => void;
 }
 
-export const LeadFormBuilder = ({ existingForms, onSaved }: LeadFormBuilderProps) => {
-  const existing = existingForms.length > 0 ? existingForms[0] : null;
+export const LeadFormBuilder = ({ existingForms, selectedFormId, onSaved }: LeadFormBuilderProps) => {
+  const existing = selectedFormId ? existingForms.find(f => f.form_id === selectedFormId) ?? null : null;
 
   const [title, setTitle] = useState(existing?.title || 'Leave your details and we\'ll get back to you:');
-  const [fields, setFields] = useState<LeadFormField[]>(
-    existing?.fields || [
-      { field_id: '', label: 'Your Name', type: 'text', required: true, placeholder: 'Your Name', order: 0 },
-      { field_id: '', label: 'Your Email', type: 'email', required: true, placeholder: 'Your Email', order: 1 },
-      { field_id: '', label: 'Phone', type: 'phone', required: false, placeholder: 'Phone (optional)', order: 2 },
-    ]
-  );
+  const [fields, setFields] = useState<LeadFormField[]>(existing?.fields || DEFAULT_FIELDS);
   const [triggerInstructions, setTriggerInstructions] = useState(
     existing?.trigger_instructions || 'the user is asking about pricing, demo, purchasing, or wants to be contacted'
   );
   const [enabled, setEnabled] = useState(existing?.enabled ?? true);
   const [saving, setSaving] = useState(false);
   const [expandedField, setExpandedField] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (existing) {
+      setTitle(existing.title);
+      setFields(existing.fields);
+      setTriggerInstructions(existing.trigger_instructions);
+      setEnabled(existing.enabled);
+    } else {
+      setTitle('Leave your details and we\'ll get back to you:');
+      setFields(DEFAULT_FIELDS);
+      setTriggerInstructions('the user is asking about pricing, demo, purchasing, or wants to be contacted');
+      setEnabled(true);
+    }
+    setExpandedField(null);
+  }, [selectedFormId, existing]);
 
   const addField = () => {
     const newField: LeadFormField = {
@@ -103,10 +119,11 @@ export const LeadFormBuilder = ({ existingForms, onSaved }: LeadFormBuilderProps
 
       if (existing) {
         await privateAxios.put(`/lead-forms/${existing.form_id}`, payload);
+        onSaved();
       } else {
-        await privateAxios.post('/lead-forms', payload);
+        const res = await privateAxios.post('/lead-forms', payload);
+        onSaved(res.data.form_id);
       }
-      onSaved();
     } catch (err) {
       console.error(err);
       alert('Failed to save lead form');
@@ -336,7 +353,7 @@ export const LeadFormBuilder = ({ existingForms, onSaved }: LeadFormBuilderProps
           ) : (
             <>
               <Save size={16} />
-              Save Lead Form
+              {existing ? 'Update Lead Form' : 'Create Lead Form'}
             </>
           )}
         </button>

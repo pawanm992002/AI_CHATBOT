@@ -127,7 +127,7 @@ const Overview = () => {
         </div>
         <div className="flex items-center gap-3 mt-4 sm:mt-0">
           <a
-            href="/api/tenants/test"
+            href={`/${encodeURIComponent(me?.business_name || 'test')}/test`}
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-2 px-4 py-2.5 bg-teal-600 text-sm font-semibold text-white rounded-xl shadow-sm hover:bg-teal-700 transition-colors"

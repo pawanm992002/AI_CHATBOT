@@ -3,14 +3,32 @@ import { privateAxios } from '../utils/axios';
 import { formatDate } from '../utils/date';
 import { Lead, LeadFormConfig } from '../interfaces';
 import { LoadingSpinner } from '@chatbot/shared';
-import { Users, Mail, Phone, Calendar, MessageSquare, Hammer } from 'lucide-react';
+import {
+  Users,
+  Mail,
+  Phone,
+  Calendar,
+  MessageSquare,
+  Hammer,
+  Plus,
+  Trash2,
+  ToggleLeft,
+  ToggleRight,
+  FileText,
+} from 'lucide-react';
 import { LeadFormBuilder } from '../components/LeadFormBuilder';
+import { DeleteConfirmationModal } from '../components/DeleteConfirmationModal';
 
 const Leads = () => {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [leadForms, setLeadForms] = useState<LeadFormConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'leads' | 'builder'>('leads');
+
+  const [selectedFormId, setSelectedFormId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<LeadFormConfig | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
 
   const fetchLeads = async () => {
     try {
@@ -38,6 +56,42 @@ const Leads = () => {
     };
     load();
   }, []);
+
+  const handleToggleEnabled = async (form: LeadFormConfig) => {
+    setTogglingId(form.form_id);
+    try {
+      await privateAxios.put(`/lead-forms/${form.form_id}`, { enabled: !form.enabled });
+      await fetchLeadForms();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await privateAxios.delete(`/lead-forms/${deleteTarget.form_id}`);
+      if (selectedFormId === deleteTarget.form_id) {
+        setSelectedFormId(null);
+      }
+      setDeleteTarget(null);
+      await fetchLeadForms();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleFormSaved = async (newFormId?: string) => {
+    await fetchLeadForms();
+    if (newFormId) {
+      setSelectedFormId(newFormId);
+    }
+  };
 
   const getInitials = (name: string) => {
     return name.split(' ').map((n) => n[0]).join('').substring(0, 2).toUpperCase() || '?';
@@ -95,7 +149,7 @@ const Leads = () => {
           Form Builder
           {leadForms.length > 0 && (
             <span className="ml-1 text-xxs bg-white/20 px-1.5 py-0.5 rounded-full">
-              {leadForms[0]?.enabled ? 'Active' : 'Off'}
+              {leadForms.length}
             </span>
           )}
         </button>
@@ -175,11 +229,121 @@ const Leads = () => {
           )}
         </div>
       ) : (
-        <LeadFormBuilder
-          existingForms={leadForms}
-          onSaved={async () => {
-            await fetchLeadForms();
+        <div className="flex gap-6 min-h-[600px]">
+          {/* Sidebar */}
+          <div className="w-72 flex-shrink-0 bg-slate-900 rounded-3xl border border-slate-800/80 shadow-lg overflow-hidden flex flex-col">
+            <div className="p-4 border-b border-slate-800">
+              <button
+                onClick={() => setSelectedFormId('new')}
+                className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold rounded-xl transition-colors cursor-pointer ${
+                  selectedFormId === 'new'
+                    ? 'bg-violet-500 text-white shadow-sm'
+                    : 'bg-violet-600 text-white hover:bg-violet-700'
+                }`}
+              >
+                <Plus size={16} />
+                New Form
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3 space-y-2">
+              {leadForms.length === 0 ? (
+                <div className="py-12 text-center">
+                  <FileText size={32} className="text-slate-700 mx-auto mb-3" />
+                  <p className="text-xs text-slate-500">No forms yet</p>
+                  <p className="text-xxs text-slate-600 mt-1">Click "New Form" to create one</p>
+                </div>
+              ) : (
+                leadForms.map((form) => {
+                  const isSelected = selectedFormId === form.form_id;
+                  return (
+                    <div
+                      key={form.form_id}
+                      onClick={() => setSelectedFormId(form.form_id)}
+                      className={`group relative p-3 rounded-xl cursor-pointer transition-all ${
+                        isSelected
+                          ? 'bg-violet-600/10 border border-violet-600/30'
+                          : 'hover:bg-slate-800/60 border border-transparent'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <p className={`text-sm font-semibold truncate ${isSelected ? 'text-violet-300' : 'text-slate-200'}`}>
+                            {form.title}
+                          </p>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-xxs text-slate-500">
+                              {form.fields.length} field{form.fields.length !== 1 ? 's' : ''}
+                            </span>
+                            <span className={`w-1.5 h-1.5 rounded-full ${form.enabled ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleToggleEnabled(form);
+                            }}
+                            disabled={togglingId === form.form_id}
+                            className="p-1 cursor-pointer disabled:opacity-50"
+                            title={form.enabled ? 'Disable form' : 'Enable form'}
+                          >
+                            {form.enabled ? (
+                              <ToggleRight size={18} className="text-emerald-400" />
+                            ) : (
+                              <ToggleLeft size={18} className="text-slate-600" />
+                            )}
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeleteTarget(form);
+                            }}
+                            className="p-1 text-slate-500 hover:text-rose-400 cursor-pointer"
+                            title="Delete form"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          {/* Editor Panel */}
+          <div className="flex-1 min-w-0">
+            {selectedFormId ? (
+              <LeadFormBuilder
+                existingForms={leadForms}
+                selectedFormId={selectedFormId}
+                onSaved={handleFormSaved}
+              />
+            ) : (
+              <div className="bg-slate-900 rounded-3xl border border-slate-800/80 shadow-lg h-full flex items-center justify-center">
+                <div className="text-center px-6">
+                  <FileText size={48} className="text-slate-700 mx-auto mb-4" />
+                  <h3 className="text-base font-bold text-white">Select a form to edit</h3>
+                  <p className="text-xs text-slate-500 mt-2 max-w-xs mx-auto">
+                    Choose a form from the sidebar to edit it, or click "New Form" to create a fresh one.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteTarget && (
+        <DeleteConfirmationModal
+          formTitle={deleteTarget.title}
+          onConfirm={handleDelete}
+          onCancel={() => {
+            setDeleteTarget(null);
           }}
+          loading={deleting}
         />
       )}
     </div>
