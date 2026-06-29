@@ -23,6 +23,9 @@ jobs:
         with:
           version: 9
 
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+
       - name: Install Dependencies
         run: pnpm install --frozen-lockfile
 
