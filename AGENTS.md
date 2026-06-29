@@ -8,7 +8,7 @@ Multi-tenant SaaS platform that lets clients crawl their websites, upload knowle
 
 ## Tech Stack
 
-- **Backend**: Python 3.12+ / FastAPI / Uvicorn / Motor (MongoDB async) / Redis / OpenAI API
+- **Backend**: Python 3.12+ / FastAPI / Uvicorn / Motor (MongoDB async) / Redis / LangChain (LLM + embeddings)
 - **Frontend**: React 18 / TypeScript / Vite / TailwindCSS 4 / pnpm monorepo
 - **Widget**: IIFE bundle injected via `<script>` tag, WebSocket streaming, CSS injection
 - **Database**: MongoDB Atlas (vector search + text search)
@@ -104,6 +104,8 @@ Open `backend/templates/test_page.html` in a browser to test the embedded widget
 | `backend/services/chat_service.py` | Core chat pipeline (classify, search, answer, log gaps) |
 | `backend/services/vector_search.py` | Hybrid vector + BM25 search |
 | `backend/services/ingestion.py` | Document chunking/embedding pipeline |
+| `backend/services/embedder.py` | OpenAI embeddings via LangChain `OpenAIEmbeddings` |
+| `backend/services/llm/factory.py` | Provider-agnostic LLM factory (OpenAI, Groq, OpenRouter) |
 | `backend/core/schema_validator.py` | MongoDB JSON schema validators (15 collections) |
 | `apps/widget/src/Widget.tsx` | Main widget component (WebSocket streaming) |
 | `apps/widget/src/index.tsx` | Widget bootstrapper (reads `data-api-key` from script tag) |
@@ -123,3 +125,5 @@ Copy `.env.production.example` to `.env` and fill in:
 - `FIRECRAWL_API_KEY` — Firecrawl API key
 - `JWT_SECRET` — Secret for JWT signing
 - `ALLOWED_ORIGINS` — Comma-separated allowed CORS origins
+- `GROQ_API_KEY` — Groq API key (optional, for Groq provider)
+- `OPENROUTER_API_KEY` — OpenRouter API key (optional, for OpenRouter provider)

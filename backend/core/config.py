@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     DO_SPACES_ACCESS_KEY: str = ""
     DO_SPACES_SECRET_KEY: str = ""
     DO_SPACES_ENDPOINT: str = ""
+    GROQ_API_KEY: str = ""
+    OPENROUTER_API_KEY: str = ""
 
     model_config = SettingsConfigDict(
         env_file=env_file_path, 

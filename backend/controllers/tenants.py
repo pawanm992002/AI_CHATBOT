@@ -1,5 +1,6 @@
 import os
 import string
+import json
 from fastapi import APIRouter, Depends, HTTPException, Response, Request, status
 from fastapi.responses import HTMLResponse
 from models.requests import TenantRegisterRequest, TenantLoginRequest, SuggestedQuestionsUpdateRequest
@@ -12,6 +13,28 @@ from datetime import datetime, timezone
 
 router = APIRouter(prefix="/tenants", tags=["tenants"])
 tenant_repo = TenantRepository()
+
+_DEFAULT_AI = {"provider": "openai", "model": "gpt-4o-mini"}
+_MODELS_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config", "models.json")
+
+
+def _load_models_catalog() -> list[dict]:
+    try:
+        with open(_MODELS_PATH, "r") as f:
+            return json.load(f)
+    except Exception as e:
+        raise RuntimeError(f"Failed to load models catalog at {_MODELS_PATH}: {e!r}") from e
+
+
+def _validate_provider_model(provider: str, model: str) -> None:
+    provider_norm = (provider or "").strip().lower()
+    model_norm = (model or "").strip()
+    allowed = any(
+        (m.get("provider") or "").strip().lower() == provider_norm and (m.get("id") or "").strip() == model_norm
+        for m in _load_models_catalog()
+    )
+    if not allowed:
+        raise HTTPException(status_code=400, detail=f"Invalid provider/model: {provider}/{model}")
 
 @router.post("/register")
 async def register(tenant: TenantRegisterRequest):
@@ -36,6 +59,7 @@ async def register(tenant: TenantRegisterRequest):
         "suggested_questions_manual": [],
         "suggested_questions_auto": [],
         "show_sources": True,
+        "ai": dict(_DEFAULT_AI),
         "created_at": datetime.now(timezone.utc),
         "status": "pending"
     }
@@ -80,6 +104,7 @@ async def get_me(current_tenant: dict = Depends(get_current_tenant)):
         "suggested_questions_manual": current_tenant.get("suggested_questions_manual", []),
         "suggested_questions_auto": current_tenant.get("suggested_questions_auto", []),
         "show_sources": current_tenant.get("show_sources", True),
+        "ai": current_tenant.get("ai", dict(_DEFAULT_AI)),
         "created_at": current_tenant.get("created_at", datetime.now(timezone.utc)),
     }
 
@@ -114,6 +139,25 @@ async def update_business_info(
 async def update_widget_settings(show_sources: bool, current_tenant: dict = Depends(get_current_tenant)):
     await tenant_repo.update(current_tenant["tenant_id"], {"show_sources": show_sources})
     return {"status": "ok", "show_sources": show_sources}
+
+@router.put("/ai")
+async def update_ai_config(payload: dict, current_tenant: dict = Depends(get_current_tenant)):
+    provider = (payload.get("provider") or "").strip()
+    model = (payload.get("model") or "").strip()
+
+    if not provider or not model:
+        raise HTTPException(status_code=400, detail="provider and model are required")
+
+    _validate_provider_model(provider, model)
+
+    ok = await tenant_repo.update(
+        current_tenant["tenant_id"],
+        {"ai": {"provider": provider.lower(), "model": model}},
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    return {"status": "ok", "ai": {"provider": provider.lower(), "model": model}}
 
 @router.get("/stats")
 async def get_stats(current_tenant: dict = Depends(get_current_tenant)):

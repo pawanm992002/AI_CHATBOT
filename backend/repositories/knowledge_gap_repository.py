@@ -2,6 +2,70 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 from core.auth import db
 
+GAPS_VECTOR_INDEX = "knowledge_gaps_vector_index"
+FAQS_VECTOR_INDEX = "faqs_vector_index"
+
+
+async def _vector_search_gaps(
+    tenant_id: str,
+    query_vector: list[float],
+    threshold: float = 0.85,
+    limit: int = 5,
+) -> list[Dict[str, Any]]:
+    """Find similar open knowledge gaps using MongoDB Atlas vector search."""
+    try:
+        pipeline = [
+            {
+                "$vectorSearch": {
+                    "index": GAPS_VECTOR_INDEX,
+                    "path": "embedding",
+                    "queryVector": query_vector,
+                    "numCandidates": max(limit * 10, 100),
+                    "limit": limit,
+                    "filter": {
+                        "tenant_id": tenant_id,
+                        "status": "open",
+                    },
+                }
+            },
+            {"$addFields": {"score": {"$meta": "vectorSearchScore"}}},
+            {"$match": {"score": {"$gte": threshold}}},
+            {"$project": {"embedding": 0}},
+        ]
+        return await db.knowledge_gaps.aggregate(pipeline).to_list(length=limit)
+    except Exception as e:
+        print(f"[VECTOR] gaps vector search failed (index may not exist): {e}")
+        return []
+
+
+async def _vector_search_faqs(
+    tenant_id: str,
+    query_vector: list[float],
+    threshold: float = 0.80,
+    limit: int = 3,
+) -> list[Dict[str, Any]]:
+    """Find similar FAQs using MongoDB Atlas vector search."""
+    try:
+        pipeline = [
+            {
+                "$vectorSearch": {
+                    "index": FAQS_VECTOR_INDEX,
+                    "path": "embedding",
+                    "queryVector": query_vector,
+                    "numCandidates": max(limit * 10, 100),
+                    "limit": limit,
+                    "filter": {"tenant_id": tenant_id},
+                }
+            },
+            {"$addFields": {"score": {"$meta": "vectorSearchScore"}}},
+            {"$match": {"score": {"$gte": threshold}}},
+            {"$project": {"embedding": 0}},
+        ]
+        return await db.faqs.aggregate(pipeline).to_list(length=limit)
+    except Exception as e:
+        print(f"[VECTOR] faqs vector search failed (index may not exist): {e}")
+        return []
+
 
 class KnowledgeGapRepository:
     def __init__(self):
@@ -36,29 +100,8 @@ class KnowledgeGapRepository:
         return result.modified_count > 0
 
     async def find_similar(self, tenant_id: str, embedding: List[float], threshold: float = 0.85) -> Optional[Dict[str, Any]]:
-        open_gaps = await self.collection.find({
-            "tenant_id": tenant_id,
-            "status": "open",
-            "embedding": {"$exists": True}
-        }).to_list(1000)
-        
-        if not open_gaps:
-            return None
-        
-        import numpy as np
-        new_embedding = np.array(embedding)
-        best_match = None
-        best_similarity = 0.0
-        
-        for gap in open_gaps:
-            if gap.get("embedding"):
-                gap_embedding = np.array(gap["embedding"])
-                cos_sim = np.dot(gap_embedding, new_embedding) / (np.linalg.norm(gap_embedding) * np.linalg.norm(new_embedding))
-                if cos_sim > best_similarity and cos_sim > threshold:
-                    best_similarity = cos_sim
-                    best_match = gap
-        
-        return best_match
+        results = await _vector_search_gaps(tenant_id, embedding, threshold, limit=1)
+        return results[0] if results else None
 
     async def increment_count(self, gap_id: str) -> bool:
         result = await self.collection.update_one(

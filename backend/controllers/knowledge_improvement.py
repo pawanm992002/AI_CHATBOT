@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from core.auth import get_current_tenant, db
-from services.embedder import openai_client
+from services.embedder import embed_text
 from services.ingestion import ingest_faq_pair
-from repositories.knowledge_gap_repository import KnowledgeGapRepository
+from repositories.knowledge_gap_repository import KnowledgeGapRepository, _vector_search_faqs
 from repositories.source_repository import SourceRepository
 from datetime import datetime, timezone
 from typing import Optional
@@ -56,11 +56,6 @@ async def list_knowledge_gaps(
     cursor = db.knowledge_gaps.find(query_filter).sort("count", -1).skip(skip).limit(limit)
     gaps = await cursor.to_list(limit)
 
-    faqs = await db.faqs.find({
-        "tenant_id": tenant_id,
-        "embedding": {"$exists": True}
-    }, {"question": 1, "answer": 1, "embedding": 1}).to_list(1000)
-
     result = []
     for gap in gaps:
         try:
@@ -69,19 +64,14 @@ async def list_knowledge_gaps(
             gap_embedding = gap.pop("embedding", None)
 
             similar_faqs = []
-            if gap_embedding and faqs:
-                gap_emb = np.array(gap_embedding)
-                for faq in faqs:
-                    if faq.get("embedding"):
-                        faq_emb = np.array(faq["embedding"])
-                        cos_sim = np.dot(gap_emb, faq_emb) / (np.linalg.norm(gap_emb) * np.linalg.norm(faq_emb))
-                        if cos_sim > 0.8:
-                            similar_faqs.append({
-                                "faq_id": str(faq["_id"]),
-                                "question": faq["question"],
-                                "similarity": round(float(cos_sim), 3),
-                            })
-                similar_faqs = sorted(similar_faqs, key=lambda x: x["similarity"], reverse=True)[:3]
+            if gap_embedding:
+                faq_results = await _vector_search_faqs(tenant_id, gap_embedding, threshold=0.80, limit=3)
+                for faq in faq_results:
+                    similar_faqs.append({
+                        "faq_id": str(faq["_id"]),
+                        "question": faq["question"],
+                        "similarity": round(faq.get("score", 0), 3),
+                    })
 
             gap["similar_faqs"] = similar_faqs
             result.append(gap)
@@ -114,11 +104,7 @@ async def resolve_knowledge_gap(
             answer=req.faq_answer,
         )
 
-        embedding_resp = await openai_client.embeddings.create(
-            model="text-embedding-3-small",
-            input=f"Q: {req.faq_question}\nA: {req.faq_answer}",
-        )
-        faq_embedding = embedding_resp.data[0].embedding
+        faq_embedding = await embed_text(f"Q: {req.faq_question}\nA: {req.faq_answer}")
 
         await db.faqs.update_one(
             {"_id": ObjectId(faq_id)},

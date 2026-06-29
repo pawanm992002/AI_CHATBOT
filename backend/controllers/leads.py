@@ -15,7 +15,7 @@ from views.responses import (
     LeadFormFieldResponse,
     LeadSubmitResponse,
 )
-from services.embedder import openai_client
+from services.llm.factory import get_llm
 from repositories.lead_repository import LeadRepository, LeadFormConfigRepository
 
 router = APIRouter(tags=["leads"])
@@ -33,16 +33,12 @@ async def _summarize_context(context: str) -> str:
     if not context or len(context.strip()) < 10:
         return ""
     try:
-        resp = await openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": _SUMMARIZE_PROMPT},
-                {"role": "user", "content": context},
-            ],
-            max_tokens=100,
-            temperature=0.0,
-        )
-        return resp.choices[0].message.content.strip()
+        llm = get_llm("openai", "gpt-4o-mini")
+        resp = await llm.ainvoke([
+            {"role": "system", "content": _SUMMARIZE_PROMPT},
+            {"role": "user", "content": context},
+        ])
+        return resp.content.strip()
     except Exception:
         return context.strip()[:200]
 

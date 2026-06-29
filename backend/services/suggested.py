@@ -1,5 +1,5 @@
 from core.auth import db
-from services.embedder import openai_client
+from services.llm.factory import get_llm
 
 
 async def generate_suggested_questions(tenant_id: str):
@@ -30,12 +30,18 @@ async def generate_suggested_questions(tenant_id: str):
 
         context = "\n".join(context_parts[:15])
 
-        tenant = await db.tenants.find_one({"tenant_id": tenant_id}, {"domain": 1, "_id": 0})
+        tenant = await db.tenants.find_one(
+            {"tenant_id": tenant_id},
+            {"domain": 1, "ai": 1, "_id": 0},
+        )
         domain = tenant.get("domain", "the website") if tenant else "the website"
+        ai_cfg = (tenant or {}).get("ai") or {}
+        provider = (ai_cfg.get("provider") or "openai").strip()
+        model = (ai_cfg.get("model") or "gpt-4o-mini").strip()
 
-        response = await openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
+        llm = get_llm(provider, model)
+        resp = await llm.ainvoke(
+            [
                 {
                     "role": "system",
                     "content": (
@@ -47,13 +53,11 @@ async def generate_suggested_questions(tenant_id: str):
                     ),
                 },
                 {"role": "user", "content": context},
-            ],
-            max_tokens=300,
-            temperature=0.7,
+            ]
         )
 
         import json
-        raw = response.choices[0].message.content.strip()
+        raw = (resp.content or "").strip()
         # Strip markdown code fences if present
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()

@@ -336,7 +336,7 @@ async def _index_page(
 async def _generate_business_description(tenant_id: str, crawl_id: str):
     """Auto-generate a short business description from crawled content."""
     try:
-        from services.embedder import openai_client
+        from services.llm.factory import get_llm
 
         pages = await db.pages.find(
             {"tenant_id": tenant_id, "crawl_id": crawl_id},
@@ -353,19 +353,15 @@ async def _generate_business_description(tenant_id: str, crawl_id: str):
             if len(combined) > 2000:
                 break
 
-        resp = await openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": (
-                    "Generate a 1-2 sentence description of what this business/website does. "
-                    "Be concise and factual. Only use information from the provided content."
-                )},
-                {"role": "user", "content": combined},
-            ],
-            max_tokens=100,
-            temperature=0.0,
-        )
-        description = resp.choices[0].message.content.strip()
+        llm = get_llm("openai", "gpt-4o-mini")
+        resp = await llm.ainvoke([
+            {"role": "system", "content": (
+                "Generate a 1-2 sentence description of what this business/website does. "
+                "Be concise and factual. Only use information from the provided content."
+            )},
+            {"role": "user", "content": combined},
+        ])
+        description = resp.content.strip()
 
         await db.tenants.update_one(
             {"tenant_id": tenant_id},

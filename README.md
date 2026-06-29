@@ -15,7 +15,7 @@ graph TD
     
     API <-->|Stores Tenants, Jobs, Chunks| MongoDB[("MongoDB Atlas")]
     API <-->|Crawls websites| Firecrawl["Firecrawl API"]
-    API <-->|Embeddings / Chat / Query Rewriting| OpenAI["OpenAI API"]
+    API <-->|Embeddings / Chat / Query Rewriting| LLM["LLM Providers<br/>(OpenAI, Groq, OpenRouter)"]
 ```
 
 ### 2. Chat Flow (Updated)
@@ -191,12 +191,32 @@ APP_ENV=development
 MAX_CRAWL_PAGES=100
 PUBLIC_URL=
 
+# LLM Providers (optional — enables multi-provider support)
+GROQ_API_KEY=gsk_your-groq-api-key-here
+OPENROUTER_API_KEY=sk-or-your-openrouter-api-key-here
+
 # Admin credentials (defaults shown)
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=admin123
 ```
 
 ## 2. MongoDB Atlas Indexes
+
+### LLM Providers
+
+The backend supports multiple LLM providers via LangChain. Each tenant can configure their own provider and model from the **Settings** page in the dashboard.
+
+| Provider | API Key Env Var | Base URL | Models |
+|---|---|---|---|
+| **OpenAI** (default) | `OPENAI_API_KEY` | `https://api.openai.com/v1` | `gpt-4o`, `gpt-4o-mini`, `gpt-4o-turbo`, `gpt-3.5-turbo` |
+| **Groq** | `GROQ_API_KEY` | `https://api.groq.com/openai/v1` | `llama-3.1-8b-instant`, `llama-3.1-70b-versatile`, `mixtral-8x7b-32768` |
+| **OpenRouter** | `OPENROUTER_API_KEY` | `https://openrouter.ai/api/v1` | `anthropic/claude-3-haiku`, `meta-llama/llama-3.1-8b-instant`, `google/gemini-2.0-flash-001` |
+
+**How it works:**
+- Tenant settings stored in `tenant.ai` field (`{ provider: "openai", model: "gpt-4o-mini" }`)
+- Factory pattern in `backend/services/llm/factory.py` creates provider-specific clients
+- All LLM calls (chat, classification, rewriting) route through the configured provider
+- Falls back to OpenAI `gpt-4o-mini` if provider init fails
 
 ### Vector Search Index (`vector_index`)
 Navigate to **Atlas Search** → **Create Search Index** → **Vector Search**.
@@ -237,6 +257,56 @@ Navigate to **Atlas Search** → **Create Search Index** → **Atlas Search**.
       "tenant_id": { "type": "string" }
     }
   }
+}
+```
+
+### Knowledge Gaps Vector Index (`knowledge_gaps_vector_index`)
+Navigate to **Atlas Search** → **Create Search Index** → **Vector Search**.
+
+- Database: `chatbot_db`, Collection: `knowledge_gaps`
+- Index Name: `knowledge_gaps_vector_index`
+
+```json
+{
+  "fields": [
+    {
+      "type": "vector",
+      "path": "embedding",
+      "numDimensions": 1536,
+      "similarity": "cosine"
+    },
+    {
+      "type": "filter",
+      "path": "tenant_id"
+    },
+    {
+      "type": "filter",
+      "path": "status"
+    }
+  ]
+}
+```
+
+### FAQs Vector Index (`faqs_vector_index`)
+Navigate to **Atlas Search** → **Create Search Index** → **Vector Search**.
+
+- Database: `chatbot_db`, Collection: `faqs`
+- Index Name: `faqs_vector_index`
+
+```json
+{
+  "fields": [
+    {
+      "type": "vector",
+      "path": "embedding",
+      "numDimensions": 1536,
+      "similarity": "cosine"
+    },
+    {
+      "type": "filter",
+      "path": "tenant_id"
+    }
+  ]
 }
 ```
 
@@ -572,7 +642,7 @@ sequenceDiagram
     Classifier-->>API: KNOWLEDGE_GAP
     
     API->>Embedder: Embed the query
-    API->>DB: Check similar gaps (cosine > 0.85)
+    API->>DB: Vector search similar gaps (cosine > 0.85)
     alt Similar gap exists
         API->>DB: Increment count on existing gap
     else New gap
@@ -602,8 +672,8 @@ sequenceDiagram
 
 - **Automatic logging** — Every unanswered query is logged with an embedding for similarity matching.
 - **Two gap types** — `knowledge_gap` (business-related, missing answer) vs `out_of_scope` (unrelated to business).
-- **Accurate similarity de-duplication** — Compares new queries against ALL existing open gaps, finds the MOST similar match, and increments count if cosine similarity > 0.85.
-- **Similar FAQ suggestions** — When viewing a gap, the backend searches ALL FAQs with embeddings and returns the top 3 most semantically similar ones (cosine > 0.8).
+- **Vector similarity de-duplication** — New queries matched against existing open gaps via MongoDB Atlas vector search (cosine > 0.85). Falls back to brute-force if vector index is unavailable.
+- **Similar FAQ suggestions** — When viewing a gap, the backend uses MongoDB Atlas vector search to find the top 3 most semantically similar FAQs (cosine > 0.8).
 - **One-click resolve** — Tenants can write an answer and select a FAQ source directly from the Knowledge Gaps page. The backend creates the FAQ pair, indexes it into the vector search pipeline, and marks the gap as resolved.
 - **Cleanup duplicates** — One-click button to merge duplicate gaps with identical normalized text.
 - **Union-Find clustering** — The re-cluster endpoint uses an efficient Union-Find algorithm to group similar gaps into clusters.
@@ -632,11 +702,11 @@ POST /dashboard/knowledge/gaps/cleanup                  # Merge duplicate gaps w
 All endpoints require JWT authentication (`Authorization: Bearer <token>`).
 
 ### Technical Details
-- Similarity threshold: 0.85 (for gap deduplication)
-- FAQ suggestion threshold: 0.8 (returns top 3 matches)
+- Similarity threshold: 0.85 (for gap deduplication via vector search)
+- FAQ suggestion threshold: 0.8 (returns top 3 matches via vector search)
 - Direct answer threshold: 0.5 (vector search score to return RAG answer)
-- Max gaps fetched for comparison: 1000
 - Embedding model: text-embedding-3-small (1536 dimensions)
+- Vector search indexes: `knowledge_gaps_vector_index` (knowledge_gaps), `faqs_vector_index` (faqs)
 - Normalization: lowercase, remove punctuation, collapse whitespace (generic, no hardcoded words)
 
 ## Lead Generation (Enquiry Form)
@@ -843,10 +913,10 @@ The embeddable chat widget (`apps/widget/`) is built as a self-executing IIFE bu
 | Backend | Python 3.12+, FastAPI, Uvicorn |
 | Database | MongoDB Atlas (Motor async driver) |
 | Cache | Redis (redis-py async client) |
-| Embeddings | OpenAI `text-embedding-3-small` |
-| Chat LLM | OpenAI `gpt-4o` |
-| Query Rewriting | OpenAI `gpt-4o-mini` |
-| Query Classification | OpenAI `gpt-4o-mini` |
+| Embeddings | OpenAI `text-embedding-3-small` (via LangChain) |
+| Chat LLM | OpenAI `gpt-4o` (configurable per-tenant) |
+| Query Rewriting | OpenAI `gpt-4o-mini` (configurable per-tenant) |
+| Query Classification | OpenAI `gpt-4o-mini` (configurable per-tenant) |
 | Business Description | OpenAI `gpt-4o-mini` |
 | Suggested Questions | OpenAI `gpt-4o-mini` |
 | Crawling | Firecrawl API |
@@ -855,6 +925,8 @@ The embeddable chat widget (`apps/widget/`) is built as a self-executing IIFE bu
 | Frontend (Widget) | React 18, Vite (IIFE bundle), react-markdown, TailwindCSS 4 |
 | Shared Types | `@chatbot/shared` workspace package |
 | Chunking | LangChain (MarkdownHeaderTextSplitter + RecursiveCharacterTextSplitter) |
+| LLM Providers | LangChain (ChatOpenAI — OpenAI, Groq, OpenRouter) |
+| Embeddings | LangChain (OpenAIEmbeddings) |
 | PDF Parsing | PyMuPDF (fitz) |
 | Token Counting | tiktoken (`cl100k_base`) |
 | Rate Limiting | slowapi (per-IP) + in-memory deque (per-tenant, per-session) |
@@ -885,8 +957,15 @@ The embeddable chat widget (`apps/widget/`) is built as a self-executing IIFE bu
 | PUT | `/api/tenants/suggested-questions` | JWT | Save manual suggested questions |
 | PUT | `/api/tenants/description` | JWT | Update business description |
 | PUT | `/api/tenants/widget-settings` | JWT | Toggle widget `show_sources` setting |
+| PUT | `/api/tenants/ai` | JWT | Update AI provider and model |
 | GET | `/api/tenants/analytics/feedback` | JWT | Get feedback analytics (likes, dislikes, ratio) |
 | GET | `/api/tenants/test` | JWT | Serve HTML test page with widget pre-configured |
+
+### LLM Providers
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| GET | `/api/providers` | JWT | List available LLM providers |
+| GET | `/api/providers/{provider}/models` | JWT | List models for a provider |
 
 ### Crawl (Widget API Key)
 | Method | Endpoint | Auth | Description |
