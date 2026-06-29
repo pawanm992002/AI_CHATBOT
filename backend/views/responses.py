@@ -101,6 +101,7 @@ class TenantResponse(BaseModel):
     suggested_questions_manual: List[str] = []
     suggested_questions_auto: List[str] = []
     show_sources: bool = True
+    ai: Optional[dict] = None
 
 
 class CrawlJobStatusResponse(BaseModel):
