@@ -20,6 +20,7 @@ export const Topbar = ({ onMenuToggle }: TopbarProps) => {
     if (pathname.startsWith('/crawl')) return 'Crawl Jobs';
     if (pathname.startsWith('/knowledge')) return 'Knowledge Gaps';
     if (pathname.startsWith('/leads')) return 'Leads & Enquiries';
+    if (pathname.startsWith('/ai-provider')) return 'AI Provider';
     if (pathname.startsWith('/settings')) return 'Settings';
     if (pathname.startsWith('/admin')) return 'System Administration';
     return 'Dashboard';

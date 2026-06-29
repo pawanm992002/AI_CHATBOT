@@ -3,7 +3,7 @@ import { privateAxios } from '../utils/axios';
 import { useStore, hasAccess } from '../store';
 import { LoadingSpinner } from '@chatbot/shared';
 import { useRbacError } from '../hooks/useRbacError';
-import { Copy, Check, RotateCw, Key, HelpCircle, Code, Plus, Trash2, Lock, ExternalLink, Monitor, Brain } from 'lucide-react';
+import { Copy, Check, RotateCw, Key, HelpCircle, Code, Plus, Trash2, Lock, ExternalLink, Monitor } from 'lucide-react';
 
 const Settings = () => {
   const { state } = useStore();
@@ -17,13 +17,6 @@ const Settings = () => {
   const [showSources, setShowSources] = useState(true);
   const [savingSettings, setSavingSettings] = useState(false);
 
-  // AI Provider state
-  const [providers, setProviders] = useState<string[]>([]);
-  const [models, setModels] = useState<any[]>([]);
-  const [selectedProvider, setSelectedProvider] = useState('');
-  const [selectedModel, setSelectedModel] = useState('');
-  const [savingAi, setSavingAi] = useState(false);
-
   const isEditor = hasAccess(state.role, 'write');
   const isAdmin = hasAccess(state.role, 'delete');
 
@@ -34,60 +27,14 @@ const Settings = () => {
       setManualQuestions(res.data.suggested_questions_manual || []);
       setAutoQuestions(res.data.suggested_questions_auto || []);
       setShowSources(res.data.show_sources !== false);
-      const ai = res.data.ai || {};
-      setSelectedProvider(ai.provider || 'openai');
-      setSelectedModel(ai.model || 'gpt-4o-mini');
     } catch (err) {
       console.error(err);
-    }
-  };
-
-  const fetchProviders = async () => {
-    try {
-      const res = await privateAxios.get('/providers');
-      setProviders(res.data);
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const fetchModels = async (provider: string) => {
-    if (!provider) return;
-    try {
-      const res = await privateAxios.get(`/providers/${provider}/models`);
-      setModels(res.data);
-    } catch (err) {
-      console.error(err);
-      setModels([]);
     }
   };
 
   useEffect(() => {
     fetchMe();
-    fetchProviders();
   }, []);
-
-  useEffect(() => {
-    if (selectedProvider) {
-      fetchModels(selectedProvider);
-    }
-  }, [selectedProvider]);
-
-  const saveAiConfig = async () => {
-    if (!isEditor) {
-      triggerRbacError("You do not have Editor permissions to update AI settings.");
-      return;
-    }
-    setSavingAi(true);
-    try {
-      await privateAxios.put('/tenants/ai', { provider: selectedProvider, model: selectedModel });
-      setMe((prev: any) => prev ? { ...prev, ai: { provider: selectedProvider, model: selectedModel } } : null);
-    } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to save AI config');
-    } finally {
-      setSavingAi(false);
-    }
-  };
 
   const rotateKey = async () => {
     if (!isAdmin) {
@@ -308,61 +255,6 @@ const Settings = () => {
                 {!isEditor && <Lock size={12} className="text-slate-500" />}
               </div>
             </div>
-          </div>
-
-          {/* AI Provider */}
-          <div className="bg-slate-900 p-6 rounded-3xl border border-slate-800/80 shadow-lg space-y-4">
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <Brain size={18} className="text-emerald-400" />
-              <span>AI Provider</span>
-            </h3>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Choose which LLM provider and model powers your chatbot responses.
-            </p>
-
-            <div className="space-y-3">
-              <div className="space-y-1.5">
-                <label className="text-xxs font-bold text-slate-500 uppercase tracking-wider">Provider</label>
-                <select
-                  value={selectedProvider}
-                  onChange={(e) => {
-                    setSelectedProvider(e.target.value);
-                    setSelectedModel('');
-                  }}
-                  disabled={!isEditor}
-                  className="w-full rounded-xl border border-slate-800 bg-slate-950 px-4 py-2.5 text-xs text-slate-200 focus:border-violet-600 focus:outline-none transition-all cursor-pointer disabled:opacity-50"
-                >
-                  {providers.map((p) => (
-                    <option key={p} value={p.toLowerCase()}>{p}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xxs font-bold text-slate-500 uppercase tracking-wider">Model</label>
-                <select
-                  value={selectedModel}
-                  onChange={(e) => setSelectedModel(e.target.value)}
-                  disabled={!isEditor || !selectedProvider}
-                  className="w-full rounded-xl border border-slate-800 bg-slate-950 px-4 py-2.5 text-xs text-slate-200 focus:border-violet-600 focus:outline-none transition-all cursor-pointer disabled:opacity-50"
-                >
-                  {models.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name} — ${m.input_price}/M in, ${m.output_price}/M out
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <button
-              onClick={saveAiConfig}
-              disabled={savingAi || !isEditor || !selectedProvider || !selectedModel}
-              className="w-full rounded-xl bg-emerald-600 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 transition-colors disabled:opacity-50 cursor-pointer"
-            >
-              {savingAi ? 'Saving...' : 'Save AI Config'}
-            </button>
-            {!isEditor && <Lock size={12} className="text-slate-500" />}
           </div>
         </div>
 

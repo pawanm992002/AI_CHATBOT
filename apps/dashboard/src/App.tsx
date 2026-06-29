@@ -16,6 +16,7 @@ import History from './pages/History';
 import KnowledgeImprovement from './pages/KnowledgeImprovement';
 import Leads from './pages/Leads';
 import Settings from './pages/Settings';
+import AIProvider from './pages/AIProvider';
 import AdminLogin from './pages/AdminLogin';
 import AdminTenants from './pages/AdminTenants';
 
@@ -215,6 +216,7 @@ const App = () => {
           <Route path="/history" element={<PrivateRoute><History /></PrivateRoute>} />
           <Route path="/knowledge" element={<PrivateRoute><KnowledgeImprovement /></PrivateRoute>} />
           <Route path="/leads" element={<PrivateRoute><Leads /></PrivateRoute>} />
+          <Route path="/ai-provider" element={<PrivateRoute><AIProvider /></PrivateRoute>} />
           <Route path="/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
           <Route path="/admin/login" element={<AdminGuestRoute><AdminLogin /></AdminGuestRoute>} />
           <Route path="/admin/tenants" element={<AdminRoute><AdminTenants /></AdminRoute>} />

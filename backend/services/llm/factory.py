@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, AsyncGenerator
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
@@ -45,6 +45,13 @@ class _LLMWrapper:
     async def ainvoke(self, messages: list[dict[str, Any]]) -> Any:
         lc_messages = _to_lc_messages(messages)
         return await self._llm.ainvoke(lc_messages)
+
+    async def astream(self, messages: list[dict[str, Any]]) -> AsyncGenerator[str, None]:
+        """Stream tokens from the LLM, yielding each token string."""
+        lc_messages = _to_lc_messages(messages)
+        async for chunk in self._llm.astream(lc_messages):
+            if chunk.content and isinstance(chunk.content, str):
+                yield chunk.content
 
 
 def get_llm(provider: str, model: str) -> _LLMWrapper:

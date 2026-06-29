@@ -183,8 +183,12 @@ async def websocket_chat(websocket: WebSocket, key_hash: str = Query(...)):
             )
 
             message_id = str(uuid.uuid4())
+
+            async def send_token(token: str):
+                await websocket.send_json({"type": "token", "content": token})
+
             try:
-                result = await chat_service.handle_message(
+                result = await chat_service.handle_message_stream(
                     ChatTurnInput(
                         tenant=tenant,
                         session_id=session_id,
@@ -192,7 +196,8 @@ async def websocket_chat(websocket: WebSocket, key_hash: str = Query(...)):
                         current_url=current_url,
                         current_page_title=current_page_title,
                         message_id=message_id,
-                    )
+                    ),
+                    on_token=send_token,
                 )
             except Exception as e:
                 print(f"[WS] Chat service error: {e}")
@@ -205,7 +210,6 @@ async def websocket_chat(websocket: WebSocket, key_hash: str = Query(...)):
                     "data": [source.model_dump() for source in result.sources],
                 })
 
-            await websocket.send_json({"type": "token", "content": result.answer})
             if result.show_enquiry_form:
                 await websocket.send_json({"type": "enquiry_form"})
             await websocket.send_json({"type": "done", "message_id": result.message_id})
