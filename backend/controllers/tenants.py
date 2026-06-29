@@ -19,6 +19,92 @@ _DEFAULT_AI = {"provider": "openai", "model": "gpt-4o-mini"}
 _MODELS_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config", "models.json")
 
 
+def _build_knowledge_html(sources: list, faq_count: int) -> str:
+    websites = [s for s in sources if s.get("source_type") == "website"]
+    docs = [s for s in sources if s.get("source_type") in ("pdf", "text")]
+    has_any = websites or docs or faq_count > 0
+
+    if not has_any:
+        return (
+            '<div class="empty-state">'
+            '<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>'
+            '<p>No knowledge sources configured yet.</p>'
+            '<p class="empty-hint">Add content in the dashboard to get started.</p>'
+            '</div>'
+        )
+
+    columns = []
+
+    if websites:
+        items = "".join(
+            '<div class="source-item">'
+            '<div class="source-icon">\U0001F310</div>'
+            '<div class="source-info">'
+            f'<span class="source-name" title="{s["name"]}">{s["name"]}</span>'
+            f'<span class="source-meta">{s.get("chunk_count", 0):,} chunks &middot; {s.get("config", {}).get("pages_found", 0)} pages</span>'
+            '</div></div>'
+            for s in websites
+        )
+        columns.append(f'<div class="knowledge-col"><h4 class="col-title">\U0001F310 Websites ({len(websites)})</h4>{items}</div>')
+    else:
+        columns.append('<div class="knowledge-col"><h4 class="col-title">\U0001F310 Websites</h4><p class="col-empty">No website sources yet</p></div>')
+
+    if docs:
+        items = "".join(
+            '<div class="source-item">'
+            '<div class="source-icon">\U0001F4C4</div>'
+            '<div class="source-info">'
+            f'<span class="source-name" title="{s["name"]}">{s["name"]}</span>'
+            f'<span class="source-meta">{s.get("chunk_count", 0):,} chunks</span>'
+            '</div></div>'
+            for s in docs
+        )
+        columns.append(f'<div class="knowledge-col"><h4 class="col-title">\U0001F4C4 Documents ({len(docs)})</h4>{items}</div>')
+    else:
+        columns.append('<div class="knowledge-col"><h4 class="col-title">\U0001F4C4 Documents</h4><p class="col-empty">No documents uploaded yet</p></div>')
+
+    if faq_count > 0:
+        columns.append(
+            f'<div class="knowledge-col">'
+            f'<h4 class="col-title">\u2753 FAQs ({faq_count})</h4>'
+            f'<div class="source-item">'
+            f'<div class="source-icon">\u2753</div>'
+            f'<div class="source-info">'
+            f'<span class="source-name">Questions &amp; Answers</span>'
+            f'<span class="source-meta">{faq_count} questions answered</span>'
+            f'</div></div></div>'
+        )
+    else:
+        columns.append('<div class="knowledge-col"><h4 class="col-title">\u2753 FAQs</h4><p class="col-empty">No FAQs added yet</p></div>')
+
+    return f'<div class="knowledge-grid">{"".join(columns)}</div>'
+
+
+def _build_leads_html(lead_forms: list) -> str:
+    if not lead_forms:
+        return (
+            '<div class="empty-state">'
+            '<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>'
+            '<p>No lead forms configured.</p>'
+            '<p class="empty-hint">Set one up in the dashboard to capture visitor enquiries.</p>'
+            '</div>'
+        )
+
+    items = []
+    for form in lead_forms:
+        status = "\u2705 Active" if form.get("enabled", True) else "\u23F8\uFE0F Disabled"
+        field_count = len(form.get("fields", []))
+        items.append(
+            '<div class="lead-item">'
+            '<div class="lead-info">'
+            f'<span class="lead-name">{form.get("title", "Untitled Form")}</span>'
+            f'<span class="lead-meta">{field_count} field{"s" if field_count != 1 else ""} &middot; {status}</span>'
+            '</div></div>'
+        )
+
+    return f'<div class="leads-list">{"".join(items)}</div>'
+
+
 def _load_models_catalog() -> list[dict]:
     try:
         with open(_MODELS_PATH, "r") as f:
@@ -197,6 +283,40 @@ async def get_feedback_analytics(current_tenant: dict = Depends(get_current_tena
 @test_router.get("/{business_name_slug}/test", response_class=HTMLResponse)
 async def test_chatbot(business_name_slug: str, current_tenant: dict = Depends(get_current_tenant)):
     """Serve a standalone test page with the widget pre-configured with tenant's API key."""
+    tenant_id = current_tenant["tenant_id"]
+
+    # Query explicit sources
+    sources = await db.sources.find({"tenant_id": tenant_id}).to_list(100)
+    for s in sources:
+        s.pop("_id", None)
+        s["chunk_count"] = await db.chunks.count_documents({
+            "tenant_id": tenant_id, "source_id": s["source_id"]
+        })
+
+    # Query crawl-derived website sources
+    crawl_jobs = await db.crawl_jobs.find(
+        {"tenant_id": tenant_id, "status": "done"}
+    ).to_list(100)
+    for job in crawl_jobs:
+        sources.append({
+            "source_type": "website",
+            "name": job.get("seed_url", "Website"),
+            "chunk_count": job.get("chunks_created", 0),
+            "config": {"pages_found": job.get("pages_found", 0)},
+        })
+
+    # Query FAQs
+    faq_count = await db.faqs.count_documents({"tenant_id": tenant_id})
+
+    # Query lead forms
+    lead_forms = await db.lead_form_configs.find({"tenant_id": tenant_id}).to_list(10)
+    for lf in lead_forms:
+        lf.pop("_id", None)
+
+    # Build HTML sections
+    knowledge_html = _build_knowledge_html(sources, faq_count)
+    leads_html = _build_leads_html(lead_forms)
+
     template_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates", "test_page.html")
     with open(template_path) as f:
         template = string.Template(f.read())
@@ -204,7 +324,10 @@ async def test_chatbot(business_name_slug: str, current_tenant: dict = Depends(g
     html = template.safe_substitute(
         business_name=current_tenant.get("business_name") or current_tenant["domain"],
         domain=current_tenant.get("domain") or "localhost",
+        description=current_tenant.get("description") or "",
         api_key=current_tenant["api_key"],
         api_base_url=current_tenant.get("api_base_url") or "",
+        knowledge_html=knowledge_html,
+        leads_html=leads_html,
     )
     return HTMLResponse(content=html)
