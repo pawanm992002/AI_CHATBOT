@@ -48,7 +48,9 @@ jobs:
             export PNPM_HOME="$HOME/.local/share/pnpm"
             export PATH="$PNPM_HOME:$HOME/.local/bin:$PATH"
             cd ${{ secrets.APP_PATH }}
-            git pull origin master
+            git fetch origin master
+            git reset --hard origin/master
+            git clean -fd
             pnpm install --frozen-lockfile
             pnpm build
             uv sync --frozen
