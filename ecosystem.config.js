@@ -16,10 +16,30 @@ module.exports = {
       env: {
         NODE_ENV: "production",
         PYTHONUNBUFFERED: "1",
-        PORT: "8000"
+        PORT: "8000",
+        APP_ENV: "production"
       },
       env_production: {
         NODE_ENV: "production"
+      }
+    },
+
+    // 2. Backend API Server for Staging
+    // pm2 startOrReload ecosystem.config.js --only ai-chatbot-backend-staging
+    {
+      name: "ai-chatbot-backend-staging",
+      script: path.join(__dirname, ".venv/bin/uvicorn"),
+      args: "main:app --app-dir backend --host 0.0.0.0 --port 8001",
+      cwd: __dirname,
+      interpreter: "none",
+      autorestart: true,
+      watch: false,
+      max_memory_restart: "1G",
+      env: {
+        NODE_ENV: "production",
+        PYTHONUNBUFFERED: "1",
+        PORT: "8001",
+        APP_ENV: "staging"
       }
     },
 

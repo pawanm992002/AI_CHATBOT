@@ -4,11 +4,15 @@ from pathlib import Path
 
 project_root = Path(__file__).resolve().parents[2]
 
-env_files_priority = [
-    ".env.production",
-    ".env.staging",
-    ".env"
-]
+# Get the APP_ENV environment variable
+app_env = os.getenv("APP_ENV", "development").lower()
+
+if app_env == "production":
+    env_files_priority = [".env.production", ".env"]
+elif app_env == "staging":
+    env_files_priority = [".env.staging", ".env"]
+else:
+    env_files_priority = [".env.development", ".env.staging", ".env"]
 
 env_file_path = None
 for env_file in env_files_priority:
