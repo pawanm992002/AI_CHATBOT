@@ -104,7 +104,7 @@ Open `backend/templates/test_page.html` in a browser to test the embedded widget
 | `backend/services/chat_service.py` | Core chat pipeline (classify, search, answer, log gaps) |
 | `backend/services/vector_search.py` | Hybrid vector + BM25 search |
 | `backend/services/ingestion.py` | Document chunking/embedding pipeline |
-| `backend/core/schema_validator.py` | MongoDB JSON schema validators (14 collections) |
+| `backend/core/schema_validator.py` | MongoDB JSON schema validators (15 collections) |
 | `apps/widget/src/Widget.tsx` | Main widget component (WebSocket streaming) |
 | `apps/widget/src/index.tsx` | Widget bootstrapper (reads `data-api-key` from script tag) |
 | `apps/dashboard/src/App.tsx` | Dashboard router with private/admin routes |

@@ -20,6 +20,7 @@ class TenantLoginRequest(BaseModel):
 
 class CrawlRequest(BaseModel):
     seed_url: str
+    urls: Optional[List[str]] = None
 
 
 class ChatRequest(BaseModel):

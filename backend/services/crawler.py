@@ -18,7 +18,7 @@ def normalize_url(url: str) -> str:
     return url.rstrip("/")
 
 
-async def crawl_task(tenant_id: str, seed_url: str, job_id: str, source_id: str = ""):
+async def crawl_task(tenant_id: str, seed_url: str, job_id: str, source_id: str = "", urls: list[str] | None = None):
     print(f"[CRAWL {job_id}] Starting crawl for seed_url={seed_url}")
 
     await db.crawl_jobs.update_one(
@@ -56,7 +56,7 @@ async def crawl_task(tenant_id: str, seed_url: str, job_id: str, source_id: str 
             await db.parents.delete_many({"tenant_id": tenant_id, "crawl_id": {"$in": old_crawl_ids}})
             await db.pages.delete_many({"tenant_id": tenant_id, "crawl_id": {"$in": old_crawl_ids}})
 
-        pages = await _crawl_with_firecrawl(seed_url)
+        pages = await _crawl_with_firecrawl(seed_url, urls=urls)
         print(f"[CRAWL {job_id}] Firecrawl returned {len(pages)} pages")
 
         pages_found = 0
@@ -271,17 +271,24 @@ async def _batch_scrape_with_firecrawl(urls: list[str]) -> list[dict]:
         raise RuntimeError(f"Firecrawl batch scrape timed out after {max_wait}s")
 
 
-async def _crawl_with_firecrawl(seed_url: str) -> list[dict]:
-    """Main crawl function: uses /map to discover URLs, then /batch/scrape to fetch content."""
-    # Step 1: Discover all URLs from sitemap
-    urls = await _map_with_firecrawl(seed_url)
+async def _crawl_with_firecrawl(seed_url: str, urls: list[str] | None = None) -> list[dict]:
+    """Main crawl function: uses /map to discover URLs, then /batch/scrape to fetch content.
+    
+    If urls are provided, skips discovery and scrapes only those URLs.
+    """
+    # Step 1: Use provided URLs or discover from sitemap
+    if urls:
+        print(f"[FIRECRAWL] Using {len(urls)} pre-selected URLs")
+        discovered_urls = urls
+    else:
+        discovered_urls = await _map_with_firecrawl(seed_url)
 
-    if not urls:
-        print(f"[FIRECRAWL] No URLs found in sitemap for {seed_url}")
+    if not discovered_urls:
+        print(f"[FIRECRAWL] No URLs to scrape for {seed_url}")
         return []
 
-    # Step 2: Batch scrape all discovered URLs
-    pages = await _batch_scrape_with_firecrawl(urls)
+    # Step 2: Batch scrape all URLs
+    pages = await _batch_scrape_with_firecrawl(discovered_urls)
     return pages
 
 

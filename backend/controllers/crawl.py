@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, BackgroundTasks
 from models.requests import CrawlRequest
 from views.responses import CrawlJobResponse
 from core.auth import verify_api_key, get_current_tenant, db
-from services.crawler import crawl_task, normalize_url
+from services.crawler import crawl_task, normalize_url, _map_with_firecrawl
 from repositories.crawl_job_repository import CrawlJobRepository
 from datetime import datetime, timezone
 import uuid
@@ -47,7 +47,7 @@ async def start_crawl(req: CrawlRequest, background_tasks: BackgroundTasks, curr
     })
 
     await _create_crawl_source_job(current_tenant["tenant_id"], job_id, seed_url)
-    background_tasks.add_task(crawl_task, current_tenant["tenant_id"], seed_url, job_id)
+    background_tasks.add_task(crawl_task, current_tenant["tenant_id"], seed_url, job_id, urls=req.urls)
     return {"job_id": job_id}
 
 
@@ -83,8 +83,19 @@ async def dashboard_start_crawl(req: CrawlRequest, background_tasks: BackgroundT
         "error": None,
     })
     await _create_crawl_source_job(current_tenant["tenant_id"], job_id, seed_url)
-    background_tasks.add_task(crawl_task, current_tenant["tenant_id"], seed_url, job_id)
+    background_tasks.add_task(crawl_task, current_tenant["tenant_id"], seed_url, job_id, urls=req.urls)
     return {"job_id": job_id}
+
+
+@router.post("/dashboard/crawl/discover")
+async def dashboard_discover_urls(req: CrawlRequest, current_tenant: dict = Depends(get_current_tenant)):
+    seed_url = normalize_url(req.seed_url)
+    try:
+        urls = await _map_with_firecrawl(seed_url)
+        return {"urls": urls, "total": len(urls)}
+    except Exception as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 def _serialize_job(job):

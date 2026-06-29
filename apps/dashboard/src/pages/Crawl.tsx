@@ -1,9 +1,46 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { privateAxios } from '../utils/axios';
 import { formatDate } from '../utils/date';
 import { useStore, hasAccess } from '../store';
 import { useRbacError } from '../hooks/useRbacError';
-import { RefreshCw, AlertCircle, History, Play, Lock, ChevronLeft, ChevronRight } from 'lucide-react';
+import {
+  RefreshCw, AlertCircle, History, Play, Lock, ChevronLeft, ChevronRight,
+  Search, CheckSquare, Square, Loader2, Globe, ChevronDown, ChevronRight as ChevronRightIcon,
+  FolderOpen, FileText, Globe2,
+} from 'lucide-react';
+
+function categorizeUrl(url: string, seedHost: string): string {
+  try {
+    const parsed = new URL(url);
+    const path = parsed.pathname;
+    if (!path || path === '/') return 'Home';
+    const segments = path.split('/').filter(Boolean);
+    if (segments.length === 0) return 'Home';
+    if (segments[0] === 'blogs') return 'Blogs';
+    if (segments[0] === 'courses') return 'Courses';
+    if (segments[0] === 'about') return 'About';
+    if (segments[0] === 'contact') return 'Contact';
+    if (segments[0] === 'results') return 'Results';
+    if (segments[0] === 'latest') return 'Latest';
+    if (segments[0] === 'schooling') return 'Schooling';
+    if (segments[0] === 'gsat') return 'GSAT';
+    if (segments[0] === 'refund-rules') return 'Policies';
+    if (segments[0] === 'Privacy-and-Policy') return 'Policies';
+    if (segments[0] === 'Terms-of-Services') return 'Policies';
+    return segments[0].charAt(0).toUpperCase() + segments[0].slice(1);
+  } catch {
+    return 'Other';
+  }
+}
+
+function getPathPreview(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return parsed.pathname + parsed.hash;
+  } catch {
+    return url;
+  }
+}
 
 const Crawl = () => {
   const { state } = useStore();
@@ -19,7 +56,54 @@ const Crawl = () => {
   const { rbacError, triggerRbacError } = useRbacError();
   const pageSize = 20;
 
+  // URL discovery state
+  const [discoveredUrls, setDiscoveredUrls] = useState<string[]>([]);
+  const [selectedUrls, setSelectedUrls] = useState<Set<string>>(new Set());
+  const [isDiscovering, setIsDiscovering] = useState(false);
+  const [discoverError, setDiscoverError] = useState('');
+  const [discoveryDone, setDiscoveryDone] = useState(false);
+  const [urlSearch, setUrlSearch] = useState('');
+  const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
+
   const isEditor = hasAccess(state.role, 'write');
+
+  // Extract host from seed URL for categorization
+  const seedHost = useMemo(() => {
+    try {
+      return new URL(seedUrl.startsWith('http') ? seedUrl : `https://${seedUrl}`).hostname;
+    } catch {
+      return '';
+    }
+  }, [seedUrl]);
+
+  // Group URLs by category
+  const groupedUrls = useMemo(() => {
+    const groups: Record<string, string[]> = {};
+    for (const url of discoveredUrls) {
+      const cat = categorizeUrl(url, seedHost);
+      if (!groups[cat]) groups[cat] = [];
+      groups[cat].push(url);
+    }
+    // Sort: Home first, then alphabetical
+    const sortedKeys = Object.keys(groups).sort((a, b) => {
+      if (a === 'Home') return -1;
+      if (b === 'Home') return 1;
+      return a.localeCompare(b);
+    });
+    return sortedKeys.map(key => ({ category: key, urls: groups[key] }));
+  }, [discoveredUrls, seedHost]);
+
+  // Filtered groups based on search
+  const filteredGroups = useMemo(() => {
+    if (!urlSearch) return groupedUrls;
+    const q = urlSearch.toLowerCase();
+    return groupedUrls
+      .map(g => ({
+        ...g,
+        urls: g.urls.filter(u => u.toLowerCase().includes(q)),
+      }))
+      .filter(g => g.urls.length > 0);
+  }, [groupedUrls, urlSearch]);
 
   const fetchHistory = async (p: number) => {
     try {
@@ -37,18 +121,49 @@ const Crawl = () => {
     fetchHistory(page);
   }, [page]);
 
+  const handleDiscover = async () => {
+    if (!isEditor) {
+      triggerRbacError("You do not have Editor permissions to launch web crawlers.");
+      return;
+    }
+    if (!seedUrl.trim() || isDiscovering) return;
+    setIsDiscovering(true);
+    setDiscoverError('');
+    setDiscoveredUrls([]);
+    setSelectedUrls(new Set());
+    setDiscoveryDone(false);
+    try {
+      const res = await privateAxios.post('/dashboard/crawl/discover', { seed_url: seedUrl });
+      const urls: string[] = res.data.urls || [];
+      setDiscoveredUrls(urls);
+      setSelectedUrls(new Set(urls));
+      setDiscoveryDone(true);
+    } catch (err: any) {
+      setDiscoverError(err.response?.data?.detail || 'Failed to discover URLs');
+    } finally {
+      setIsDiscovering(false);
+    }
+  };
+
   const handleCrawl = async () => {
     if (!isEditor) {
       triggerRbacError("You do not have Editor permissions to launch web crawlers.");
       return;
     }
-    if (!seedUrl || isStarting) return;
+    const urlsToCrawl = Array.from(selectedUrls);
+    if (!seedUrl.trim() || urlsToCrawl.length === 0 || isStarting) return;
     setIsStarting(true);
     setCrawlError('');
     try {
-      const res = await privateAxios.post('/dashboard/crawl', { seed_url: seedUrl });
+      const res = await privateAxios.post('/dashboard/crawl', {
+        seed_url: seedUrl,
+        urls: urlsToCrawl,
+      });
       setJobId(res.data.job_id);
       setJobStatus(null);
+      setDiscoveredUrls([]);
+      setSelectedUrls(new Set());
+      setDiscoveryDone(false);
       setSeedUrl('');
       setPage(1);
       fetchHistory(1);
@@ -57,6 +172,45 @@ const Crawl = () => {
     } finally {
       setIsStarting(false);
     }
+  };
+
+  const toggleUrl = (url: string) => {
+    setSelectedUrls(prev => {
+      const next = new Set(prev);
+      if (next.has(url)) next.delete(url);
+      else next.add(url);
+      return next;
+    });
+  };
+
+  const toggleCategory = (urls: string[]) => {
+    setSelectedUrls(prev => {
+      const next = new Set(prev);
+      const allSelected = urls.every(u => next.has(u));
+      if (allSelected) {
+        urls.forEach(u => next.delete(u));
+      } else {
+        urls.forEach(u => next.add(u));
+      }
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    if (selectedUrls.size === discoveredUrls.length) {
+      setSelectedUrls(new Set());
+    } else {
+      setSelectedUrls(new Set(discoveredUrls));
+    }
+  };
+
+  const toggleCollapsed = (cat: string) => {
+    setCollapsedCategories(prev => {
+      const next = new Set(prev);
+      if (next.has(cat)) next.delete(cat);
+      else next.add(cat);
+      return next;
+    });
   };
 
   useEffect(() => {
@@ -85,7 +239,7 @@ const Crawl = () => {
       <div>
         <h2 className="text-2xl font-bold text-white tracking-tight">Website Crawler</h2>
         <p className="text-slate-400 text-sm mt-1">
-          Index entire websites page-by-page. Content is extracted, chunked, and embedded into the search database.
+          Discover URLs, select which to crawl, then index content into the search database.
         </p>
       </div>
 
@@ -117,19 +271,40 @@ const Crawl = () => {
                 onChange={(e) => {
                   setSeedUrl(e.target.value);
                   setCrawlError('');
+                  setDiscoverError('');
+                  setDiscoveryDone(false);
+                  setDiscoveredUrls([]);
+                  setSelectedUrls(new Set());
                 }}
                 className="w-full rounded-xl border border-slate-800 bg-slate-950 px-4 py-2.5 text-sm text-slate-200 placeholder-slate-600 focus:border-violet-600 focus:outline-none transition-all"
               />
             </div>
             <button
-              onClick={handleCrawl}
-              disabled={isStarting || !seedUrl.trim()}
-              className="w-full sm:w-auto px-5 py-2.5 bg-violet-600 text-sm font-semibold text-white rounded-xl shadow-md hover:bg-violet-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-1.5"
+              onClick={handleDiscover}
+              disabled={isDiscovering || !seedUrl.trim() || !isEditor}
+              className="w-full sm:w-auto px-5 py-2.5 bg-slate-700 text-sm font-semibold text-white rounded-xl shadow-md hover:bg-slate-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-1.5"
             >
               {!isEditor && <Lock size={14} />}
-              <span>{isStarting ? 'Starting...' : 'Start Crawl'}</span>
+              {isDiscovering ? (
+                <>
+                  <Loader2 size={14} className="animate-spin" />
+                  <span>Discovering...</span>
+                </>
+              ) : (
+                <>
+                  <Search size={14} />
+                  <span>Discover URLs</span>
+                </>
+              )}
             </button>
           </div>
+
+          {discoverError && (
+            <div className="flex items-start gap-3 rounded-xl bg-rose-950/40 p-4 text-sm text-rose-350 border border-rose-900/60">
+              <AlertCircle size={18} className="mt-0.5 flex-shrink-0" />
+              <span>{discoverError}</span>
+            </div>
+          )}
 
           {crawlError && (
             <div className="flex items-start gap-3 rounded-xl bg-rose-950/40 p-4 text-sm text-rose-350 border border-rose-900/60">
@@ -149,11 +324,169 @@ const Crawl = () => {
             </li>
             <li className="flex items-start gap-2">
               <span className="h-1.5 w-1.5 rounded-full bg-violet-500 mt-1.5 flex-shrink-0" />
-              <span>Crawls will respect standard subpath boundaries and follow internal links.</span>
+              <span>Discover URLs first, then select which pages to crawl.</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-violet-500 mt-1.5 flex-shrink-0" />
+              <span>Use category toggles to quickly select/deselect entire groups.</span>
             </li>
           </ul>
         </div>
       </div>
+
+      {/* Discovered URLs Panel */}
+      {discoveryDone && discoveredUrls.length > 0 && (
+        <div className="bg-slate-900 p-6 rounded-3xl border border-slate-800/80 shadow-lg space-y-4 animate-slideUp">
+          {/* Header row */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <Globe size={18} className="text-violet-400" />
+              <h3 className="text-sm font-bold text-white">
+                Discovered URLs
+              </h3>
+              <span className="text-xs text-slate-400 font-medium">
+                {selectedUrls.size}/{discoveredUrls.length} selected
+              </span>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={toggleAll}
+                className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                {selectedUrls.size === discoveredUrls.length ? 'Deselect All' : 'Select All'}
+              </button>
+              <button
+                onClick={handleCrawl}
+                disabled={isStarting || selectedUrls.size === 0}
+                className="px-4 py-1.5 bg-violet-600 text-xs font-semibold text-white rounded-xl shadow-md hover:bg-violet-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                {isStarting ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    <span>Starting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Play size={14} />
+                    <span>Crawl Selected ({selectedUrls.size})</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Search filter */}
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+            <input
+              type="text"
+              placeholder="Filter URLs..."
+              value={urlSearch}
+              onChange={(e) => setUrlSearch(e.target.value)}
+              className="w-full rounded-xl border border-slate-800 bg-slate-950 pl-9 pr-4 py-2 text-xs text-slate-200 placeholder-slate-600 focus:border-violet-600 focus:outline-none transition-all"
+            />
+          </div>
+
+          {/* Category groups */}
+          <div className="max-h-[32rem] overflow-y-auto space-y-2 pr-1 scrollbar-thin">
+            {filteredGroups.map(({ category, urls }) => {
+              const selectedCount = urls.filter(u => selectedUrls.has(u)).length;
+              const allSelected = selectedCount === urls.length;
+              const someSelected = selectedCount > 0 && !allSelected;
+              const isCollapsed = collapsedCategories.has(category);
+
+              return (
+                <div key={category} className="border border-slate-800/60 rounded-xl overflow-hidden">
+                  {/* Category header */}
+                  <div
+                    className="flex items-center gap-3 px-3 py-2.5 bg-slate-950/60 cursor-pointer hover:bg-slate-950/80 transition-colors select-none"
+                    onClick={() => toggleCollapsed(category)}
+                  >
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleCategory(urls);
+                      }}
+                      className="flex-shrink-0 cursor-pointer"
+                      title={allSelected ? `Deselect all ${category}` : `Select all ${category}`}
+                    >
+                      {allSelected ? (
+                        <CheckSquare size={16} className="text-violet-400" />
+                      ) : someSelected ? (
+                        <div className="w-4 h-4 rounded border-2 border-violet-400 bg-violet-400/20 flex items-center justify-center">
+                          <div className="w-2 h-0.5 bg-violet-400 rounded" />
+                        </div>
+                      ) : (
+                        <Square size={16} className="text-slate-600" />
+                      )}
+                    </button>
+
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      {category === 'Blogs' ? (
+                        <FileText size={14} className="text-slate-500 flex-shrink-0" />
+                      ) : category === 'Home' ? (
+                        <Globe2 size={14} className="text-slate-500 flex-shrink-0" />
+                      ) : (
+                        <FolderOpen size={14} className="text-slate-500 flex-shrink-0" />
+                      )}
+                      <span className="text-xs font-bold text-slate-200">{category}</span>
+                      <span className="text-xxs text-slate-500 font-medium">
+                        {selectedCount}/{urls.length}
+                      </span>
+                    </div>
+
+                    {isCollapsed ? (
+                      <ChevronRightIcon size={14} className="text-slate-600 flex-shrink-0" />
+                    ) : (
+                      <ChevronDown size={14} className="text-slate-600 flex-shrink-0" />
+                    )}
+                  </div>
+
+                  {/* URL list (collapsible) */}
+                  {!isCollapsed && (
+                    <div className="divide-y divide-slate-800/40">
+                      {urls.map((url, idx) => (
+                        <label
+                          key={idx}
+                          className="flex items-center gap-3 px-3 py-2 pl-8 hover:bg-slate-950/40 cursor-pointer transition-colors group"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedUrls.has(url)}
+                            onChange={() => toggleUrl(url)}
+                            className="sr-only"
+                          />
+                          {selectedUrls.has(url) ? (
+                            <CheckSquare size={14} className="text-violet-400 flex-shrink-0" />
+                          ) : (
+                            <Square size={14} className="text-slate-600 group-hover:text-slate-500 flex-shrink-0" />
+                          )}
+                          <span className="text-xs text-slate-400 truncate font-mono" title={url}>
+                            {getPathPreview(url)}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {filteredGroups.length === 0 && urlSearch && (
+              <div className="text-center py-4 text-xs text-slate-500">
+                No URLs match "{urlSearch}"
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {discoveryDone && discoveredUrls.length === 0 && (
+        <div className="bg-slate-900 p-6 rounded-3xl border border-slate-800/80 shadow-lg text-center">
+          <Globe size={36} className="text-slate-700 mx-auto mb-3" />
+          <h4 className="text-sm font-bold text-white">No URLs found</h4>
+          <p className="text-xs text-slate-500 mt-1">The sitemap returned no URLs for this seed URL.</p>
+        </div>
+      )}
 
       {/* Active Job Tracker */}
       {jobStatus && (

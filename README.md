@@ -713,7 +713,7 @@ Three layers of rate limiting protect the chat endpoint:
 
 | Layer | Scope | Limit | Mechanism | Purpose |
 |-------|-------|-------|-----------|---------|
-| **Per-IP** | Client IP address | 20 req/min | slowapi (`@limiter.limit`) | Catches individual bad actors bypassing session ID |
+| **Per-IP** | Client IP address | 60 req/min | slowapi (`@limiter.limit`) | Catches individual bad actors bypassing session ID |
 | **Per-tenant** | API key / tenant ID | 100 req/min | In-memory sliding window (`deque`) | All real users + attackers combined. Protects costs. |
 | **Per-session** | `chat_session_id` cookie | 20 req/min | In-memory sliding window (`deque`) | Stops a single abusive user |
 | **Max query length** | All requests | 500 chars | Rejected with 400 | Prevents token waste on huge inputs |
