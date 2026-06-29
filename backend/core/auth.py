@@ -1,14 +1,20 @@
-import os
 import hashlib
 from datetime import datetime, timedelta, timezone
 import bcrypt
 from jose import JWTError, jwt
 from fastapi import Depends, HTTPException, status, Request, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-from motor.motor_asyncio import AsyncIOMotorClient
+import socket
 from core.config import settings
+
+# Patch socket.getaddrinfo to force IPv4 and prevent unreachable IPv6 connection errors
+if settings.FORCE_IPV4:
+    orig_getaddrinfo = socket.getaddrinfo
+    def getaddrinfo_ipv4(host, port, family=0, type=0, proto=0, flags=0):
+        return orig_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
+    socket.getaddrinfo = getaddrinfo_ipv4
+
+from motor.motor_asyncio import AsyncIOMotorClient
 
 security = HTTPBearer()
 
@@ -16,8 +22,6 @@ ALGORITHM = "HS256"
 
 COOKIE_NAME = "access_token"
 COOKIE_MAX_AGE = 604800  # 7 days in seconds
-
-limiter = Limiter(key_func=get_remote_address)
 
 client = AsyncIOMotorClient(settings.MONGODB_URI)
 db = client[settings.MONGODB_DB_NAME]
@@ -130,7 +134,15 @@ async def get_current_tenant(request: Request):
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Your registration has been rejected",
         )
-        
+    
+    # Rate limiting for Dashboard API
+    # Limit by Tenant ID: 120 requests per minute
+    from core.rate_limiter import check_rate_limit
+    tenant_id = tenant["tenant_id"]
+    if await check_rate_limit(f"rate_limit:dashboard:tenant:{tenant_id}", limit=120, window=60):
+        raise HTTPException(status_code=429, detail="Too many requests. Please slow down.")
+
+    request.state.tenant_id = tenant_id
     return tenant
 
 async def get_current_admin(request: Request):
@@ -140,6 +152,13 @@ async def get_current_admin(request: Request):
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required",
         )
+    
+    # Rate limiting for Admin API
+    # Limit by admin user: 120 requests per minute
+    from core.rate_limiter import check_rate_limit
+    if await check_rate_limit("rate_limit:admin", limit=120, window=60):
+        raise HTTPException(status_code=429, detail="Too many requests. Please slow down.")
+
     return {"username": "admin", "role": "admin"}
 
 async def verify_api_key(request: Request, credentials: HTTPAuthorizationCredentials = Depends(security)):
@@ -162,4 +181,17 @@ async def verify_api_key(request: Request, credentials: HTTPAuthorizationCredent
         if tenant["domain"] not in origin:
             raise HTTPException(status_code=403, detail="Domain not allowed")
 
+    # Rate limiting for Widget API
+    # 1. Per-IP: 60 requests per minute
+    from core.rate_limiter import check_rate_limit, get_client_ip
+    ip = get_client_ip(request)
+    if await check_rate_limit(f"rate_limit:widget:ip:{ip}", limit=60, window=60):
+        raise HTTPException(status_code=429, detail="Too many requests. Please slow down.")
+
+    # 2. Per-Tenant: 200 requests per minute
+    tenant_id = tenant["tenant_id"]
+    if await check_rate_limit(f"rate_limit:widget:tenant:{tenant_id}", limit=200, window=60):
+        raise HTTPException(status_code=429, detail="Too many requests. Please slow down.")
+
+    request.state.tenant_id = tenant_id
     return tenant

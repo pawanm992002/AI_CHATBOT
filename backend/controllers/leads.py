@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from core.auth import db, get_current_tenant, verify_api_key
 from models.requests import (
@@ -185,8 +185,21 @@ async def get_widget_lead_form(current_tenant: dict = Depends(verify_api_key)):
 
 
 @router.post("/leads", response_model=LeadSubmitResponse)
-async def submit_lead(req: LeadSubmitRequest, current_tenant: dict = Depends(verify_api_key)):
+async def submit_lead(req: LeadSubmitRequest, request: Request, current_tenant: dict = Depends(verify_api_key)):
     tenant_id = current_tenant["tenant_id"]
+    session_id = req.session_id or ""
+
+    from core.rate_limiter import check_rate_limit, get_client_ip
+    
+    # 1. Limit by IP: 30 per minute
+    ip = get_client_ip(request)
+    if await check_rate_limit(f"rate_limit:leads:ip:{ip}", limit=30, window=60):
+        raise HTTPException(status_code=429, detail="Too many lead submissions. Please try again later.")
+        
+    # 2. Limit by Session: 10 per minute
+    if session_id:
+        if await check_rate_limit(f"rate_limit:leads:session:{session_id}", limit=10, window=60):
+            raise HTTPException(status_code=429, detail="Too many lead submissions for this session. Please try again later.")
 
     summary = await _summarize_context(req.message or "")
 

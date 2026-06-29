@@ -2,16 +2,11 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import FileResponse, RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from controllers import tenants, crawl, chat, sources, faqs, text_docs, leads, admin, knowledge_improvement, providers
-from slowapi import _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
-from core.auth import db, limiter
+from core.auth import db
 from fastapi.staticfiles import StaticFiles
 import os
 
 app = FastAPI(title="Chatbot Widget SaaS")
-
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 class CORSRreflectMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):

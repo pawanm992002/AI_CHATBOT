@@ -1,10 +1,8 @@
-from collections import defaultdict, deque
 from datetime import datetime, timezone
 import json
-import time
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
-from core.auth import db, limiter, verify_api_key
+from core.auth import db, verify_api_key
 from core.config import settings
 from models.requests import ChatRequest, FeedbackRequest
 from services.chat_service import ChatService, ChatTurnInput
@@ -20,9 +18,6 @@ MAX_QUERY_LENGTH = 500
 PER_TENANT_RATE_LIMIT = 100
 PER_SESSION_RATE_LIMIT = 20
 RATE_WINDOW_SECONDS = 60
-
-_tenant_limits: dict[str, deque] = defaultdict(deque)
-_session_limits: dict[str, deque] = defaultdict(deque)
 
 
 @router.get("/widget/config", response_model=WidgetConfigResponse)
@@ -52,7 +47,6 @@ async def get_widget_config(current_tenant: dict = Depends(verify_api_key)):
 
 
 @router.post("/chat", response_model=ChatResponse)
-@limiter.limit("60/minute")
 async def chat(
     request: Request,
     req: ChatRequest,
@@ -64,9 +58,11 @@ async def chat(
 
     if len(req.query) > MAX_QUERY_LENGTH:
         raise HTTPException(status_code=400, detail="Query too long.")
-    if not _check_rate_limit(tenant_id, _tenant_limits, PER_TENANT_RATE_LIMIT):
+    
+    from core.rate_limiter import check_rate_limit
+    if await check_rate_limit(f"rate_limit:chat:tenant:{tenant_id}", limit=PER_TENANT_RATE_LIMIT, window=RATE_WINDOW_SECONDS):
         raise HTTPException(status_code=429, detail="Too many requests. Please slow down.")
-    if not _check_rate_limit(session_id, _session_limits, PER_SESSION_RATE_LIMIT):
+    if await check_rate_limit(f"rate_limit:chat:session:{session_id}", limit=PER_SESSION_RATE_LIMIT, window=RATE_WINDOW_SECONDS):
         raise HTTPException(status_code=429, detail="Too many requests. Please slow down.")
 
     fastapi_response.set_cookie(
@@ -128,6 +124,14 @@ async def submit_feedback(req: FeedbackRequest, current_tenant: dict = Depends(v
 
 @router.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket, key_hash: str = Query(...)):
+    # Limit WS connection attempts: 30 connection attempts per minute per IP
+    from core.rate_limiter import check_rate_limit
+    ip = websocket.client.host if websocket.client else "0.0.0.0"
+    if await check_rate_limit(f"rate_limit:ws_conn:{ip}", limit=30, window=60):
+        await websocket.accept()
+        await websocket.close(code=4003, reason="Too many connection attempts")
+        return
+
     await websocket.accept()
 
     tenant = await db.tenants.find_one({"api_key_hash": key_hash})
@@ -167,10 +171,10 @@ async def websocket_chat(websocket: WebSocket, key_hash: str = Query(...)):
                 continue
 
             tenant_id = tenant["tenant_id"]
-            if not _check_rate_limit(tenant_id, _tenant_limits, PER_TENANT_RATE_LIMIT):
+            if await check_rate_limit(f"rate_limit:chat:tenant:{tenant_id}", limit=PER_TENANT_RATE_LIMIT, window=RATE_WINDOW_SECONDS):
                 await websocket.send_json({"type": "error", "detail": "Too many requests. Please slow down."})
                 continue
-            if not _check_rate_limit(session_id, _session_limits, PER_SESSION_RATE_LIMIT):
+            if await check_rate_limit(f"rate_limit:chat:session:{session_id}", limit=PER_SESSION_RATE_LIMIT, window=RATE_WINDOW_SECONDS):
                 await websocket.send_json({"type": "error", "detail": "Too many requests. Please slow down."})
                 continue
 
@@ -222,24 +226,6 @@ async def websocket_chat(websocket: WebSocket, key_hash: str = Query(...)):
             await websocket.close(code=1011, reason="Internal server error")
         except Exception:
             pass
-
-
-def _check_rate_limit(key: str, limits: dict, max_reqs: int) -> bool:
-    now = time.time()
-    window_start = now - RATE_WINDOW_SECONDS
-    dq = limits[key]
-    while dq and dq[0] < window_start:
-        dq.popleft()
-    if len(dq) >= max_reqs:
-        return False
-    dq.append(now)
-    return True
-
-
-def _client_ip(request: Request) -> str:
-    if request.client:
-        return request.client.host
-    return request.headers.get("x-forwarded-for", "0.0.0.0").split(",")[0].strip()
 
 
 async def _upsert_visitor(

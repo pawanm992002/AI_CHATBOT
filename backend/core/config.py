@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     COOKIE_SAMESITE: str = "lax"
     ENFORCE_DOMAIN: bool = False
     REDIS_URI: str = "redis://localhost:6379/0"
+    FORCE_IPV4: bool = True
     APP_ENV: str = "development"
     MAX_CRAWL_PAGES: int = 100
     PUBLIC_URL: str = ""

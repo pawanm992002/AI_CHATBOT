@@ -4,6 +4,8 @@ from core.auth import create_access_token, get_current_admin, db, set_auth_cooki
 from core.config import settings
 import os
 
+from core.rate_limiter import RateLimiter
+
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 class AdminLogin(BaseModel):
@@ -13,7 +15,7 @@ class AdminLogin(BaseModel):
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
 
-@router.post("/login")
+@router.post("/login", dependencies=[Depends(RateLimiter(limit=5, window=60, key_prefix="admin_login"))])
 async def admin_login(creds: AdminLogin, response: Response, request: Request):
     if creds.username == ADMIN_USERNAME and creds.password == ADMIN_PASSWORD:
         access_token = create_access_token(data={"sub": "system_admin", "role": "admin"})

@@ -7,10 +7,10 @@
     "build": "uv sync && pnpm install && pnpm -r build",
     "dev:dashboard": "pnpm --filter dashboard dev",
     "dev:widget": "pnpm --filter widget build --watch",
-    "dev:backend": "uv run python -m uvicorn main:app --app-dir backend --reload",
+    "dev:backend": "uv run python backend/run.py --reload",
     "dev:frontend": "concurrently --names \"DASH,WIDGET\" --prefix-colors \"blue,green\" \"pnpm dev:dashboard\" \"pnpm dev:widget\"",
     "dev": "concurrently --kill-others-on-fail --names \"API,FRONTEND\" --prefix-colors \"red,blue\" \"pnpm dev:backend\" \"pnpm dev:frontend\"",
-    "start": "pnpm dev:backend",
+    "start": "uv run python backend/run.py",
     "killbackend": "lsof -ti:8000 | xargs -r kill -9 && echo 'Backend killed'",
     "clean": "rm -rf node_modules apps/*/node_modules packages/*/node_modules apps/*/dist packages/*/dist .venv backend/.venv && find . -type d -name \"__pycache__\" -exec rm -rf {} + && pnpm store prune"
   },
