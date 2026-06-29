@@ -10,10 +10,12 @@ import uuid
 import secrets
 from datetime import datetime, timezone
 
+from core.rate_limiter import RateLimiter
+
 router = APIRouter(prefix="/tenants", tags=["tenants"])
 tenant_repo = TenantRepository()
 
-@router.post("/register")
+@router.post("/register", dependencies=[Depends(RateLimiter(limit=5, window=3600, key_prefix="tenant_register"))])
 async def register(tenant: TenantRegisterRequest):
     existing = await tenant_repo.get_by_domain(tenant.domain)
     if existing:
@@ -43,7 +45,7 @@ async def register(tenant: TenantRegisterRequest):
 
     return {"message": "Registration successful! Your account is pending administrator approval."}
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login", response_model=TokenResponse, dependencies=[Depends(RateLimiter(limit=10, window=60, key_prefix="tenant_login"))])
 async def login(tenant: TenantLoginRequest, response: Response, request: Request):
     db_tenant = await tenant_repo.get_by_domain(tenant.domain)
     if not db_tenant or not verify_password(tenant.password, db_tenant["password_hash"]):
