@@ -14,7 +14,13 @@ def main():
         # Run uvicorn server on port 8000
         uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=reload)
     except KeyboardInterrupt:
-        # Exit gracefully with code 0 on Ctrl+C to prevent tracebacks and pnpm errors
+        # Exit gracefully with code 0 on Ctrl+C
+        pass
+    finally:
+        # If interrupted (Ctrl+C) again during Python's interpreter atexit teardown
+        # (e.g. while pymongo is shutting down background threads), exit instantly and cleanly
+        import signal
+        signal.signal(signal.SIGINT, lambda sig, frame: os._exit(0))
         try:
             sys.exit(0)
         except SystemExit:
