@@ -45,6 +45,7 @@ class ChatTurnResult:
     answer: str
     sources: list[ChatSource]
     show_enquiry_form: bool = False
+    enquiry_form_id: str = ""
 
 
 _GREETING_PATTERN = re.compile(
@@ -72,14 +73,36 @@ class ChatService:
         return provider, model
 
     async def _get_enquiry_form_instruction(self, tenant_id: str) -> str:
-        """Get the enquiry form instruction for a tenant based on their lead form config."""
-        config = await _form_config_repo.get_enabled_for_tenant(tenant_id)
-        if not config:
+        """Get the enquiry form instruction for a tenant based on their lead form configs."""
+        forms = await _form_config_repo.get_all_enabled_for_tenant(tenant_id)
+        if not forms:
             return prompts.NO_ENQUIRY_FORM_INSTRUCTION
-        trigger = config.get("trigger_instructions", "").strip()
-        if trigger:
-            return f"However, if {trigger}, offer to help and at the end of your response append [ENQUIRY_FORM]. "
-        return prompts.DEFAULT_ENQUIRY_FORM_INSTRUCTION
+
+        if len(forms) == 1:
+            trigger = forms[0].get("trigger_instructions", "").strip()
+            if trigger:
+                return f"However, if {trigger}, offer to help and at the end of your response append [ENQUIRY_FORM]. "
+            return prompts.DEFAULT_ENQUIRY_FORM_INSTRUCTION
+
+        form_list = []
+        for f in forms:
+            title = f.get("title", "Contact Form")
+            form_id = f.get("form_id", "")
+            trigger = f.get("trigger_instructions", "").strip()
+            if trigger:
+                form_list.append(f"- \"{title}\" (form_id: {form_id}): {trigger}")
+
+        if not form_list:
+            return prompts.DEFAULT_ENQUIRY_FORM_INSTRUCTION
+
+        forms_text = "\n".join(form_list)
+        return (
+            f"Available lead forms (pick the MOST relevant one based on user intent):\n"
+            f"{forms_text}\n"
+            f"If the user's message matches any form's trigger, offer to help and append [ENQUIRY_FORM:form_id] at the end of your response. "
+            f"Replace form_id with the actual form_id of the best matching form. "
+            f"If none match, do NOT append anything.\n"
+        )
 
     async def handle_message(self, turn: ChatTurnInput) -> ChatTurnResult:
         tenant_id = turn.tenant["tenant_id"]
@@ -97,14 +120,14 @@ class ChatService:
         if classification == QueryClass.OUT_OF_SCOPE:
             messages.append({"role": "user", "content": turn.query})
             system_prompt = prompts.NO_MATCH_OUT_OF_SCOPE_PROMPT.format(business_name=business_name)
-            answer, show_form = await self._complete_answer(system_prompt, messages, provider, model)
+            answer, show_form, form_id = await self._complete_answer(system_prompt, messages, provider, model)
             messages.append({"role": "assistant", "content": answer})
             summary, messages = await self._compact_if_needed(summary, messages, provider, model)
             await self._persist_conversation(turn, summary, messages)
             await self._track_visitor_message(turn.session_id)
             if not show_form:
                 await self._log_knowledge_gap(tenant_id, turn.query, turn.current_url, "out_of_scope", turn.message_id)
-            return ChatTurnResult(message_id=turn.message_id, answer=answer, sources=[], show_enquiry_form=show_form)
+            return ChatTurnResult(message_id=turn.message_id, answer=answer, sources=[], show_enquiry_form=show_form, enquiry_form_id=form_id)
 
         search_query = turn.query
         needs_search = True
@@ -158,14 +181,14 @@ class ChatService:
         if classification == QueryClass.OUT_OF_SCOPE:
             messages.append({"role": "user", "content": turn.query})
             system_prompt = prompts.NO_MATCH_OUT_OF_SCOPE_PROMPT.format(business_name=business_name)
-            answer, show_form = await self._complete_answer(system_prompt, messages, provider, model)
+            answer, show_form, form_id = await self._complete_answer(system_prompt, messages, provider, model)
             messages.append({"role": "assistant", "content": answer})
             summary, messages = await self._compact_if_needed(summary, messages, provider, model)
             await self._persist_conversation(turn, summary, messages)
             await self._track_visitor_message(turn.session_id)
             if not show_form:
                 await self._log_knowledge_gap(tenant_id, turn.query, turn.current_url, "out_of_scope", turn.message_id)
-            return ChatTurnResult(message_id=turn.message_id, answer=answer, sources=[], show_enquiry_form=show_form)
+            return ChatTurnResult(message_id=turn.message_id, answer=answer, sources=[], show_enquiry_form=show_form, enquiry_form_id=form_id)
 
         search_query = turn.query
         needs_search = True
@@ -286,7 +309,7 @@ class ChatService:
         messages.append({"role": "user", "content": turn.query})
         system_prompt = self._build_no_match_prompt(turn, summary, messages, gap_type)
         tenant_ai_provider, tenant_ai_model = self._tenant_llm_provider_model(turn.tenant)
-        answer, show_form = await self._complete_answer(system_prompt, messages, tenant_ai_provider, tenant_ai_model)
+        answer, show_form, form_id = await self._complete_answer(system_prompt, messages, tenant_ai_provider, tenant_ai_model)
         messages.append({"role": "assistant", "content": answer})
 
         summary, messages = await self._compact_if_needed(summary, messages, tenant_ai_provider, tenant_ai_model)
@@ -329,14 +352,14 @@ class ChatService:
 
         messages.append({"role": "user", "content": turn.query})
         tenant_ai_provider, tenant_ai_model = self._tenant_llm_provider_model(turn.tenant)
-        answer, show_form = await self._complete_answer(system_prompt, messages, tenant_ai_provider, tenant_ai_model)
+        answer, show_form, form_id = await self._complete_answer(system_prompt, messages, tenant_ai_provider, tenant_ai_model)
         messages.append({"role": "assistant", "content": answer})
 
         summary, messages = await self._compact_if_needed(summary, messages, tenant_ai_provider, tenant_ai_model)
         await self._persist_conversation(turn, summary, messages)
         await self._track_visitor_message(turn.session_id)
 
-        return ChatTurnResult(message_id=turn.message_id, answer=answer, sources=sources, show_enquiry_form=show_form)
+        return ChatTurnResult(message_id=turn.message_id, answer=answer, sources=sources, show_enquiry_form=show_form, enquiry_form_id=form_id)
 
     async def _classify_query(self, query: str, summary: str, messages: list[dict], provider: str = "openai", model: str = "gpt-4o-mini") -> QueryClass:
         q = query.strip()
@@ -417,15 +440,28 @@ class ChatService:
             prompt += f"\n\nHere is a summary of the conversation so far:\n{summary}"
         return prompt
 
-    async def _complete_answer(self, system_prompt: str, messages: list[dict], provider: str = "openai", model: str = "gpt-4o") -> tuple[str, bool]:
+    @staticmethod
+    def _parse_enquiry_marker(text: str) -> tuple[bool, str]:
+        """Parse [ENQUIRY_FORM] or [ENQUIRY_FORM:form_id] from text."""
+        match = re.search(r'\[ENQUIRY_FORM(?::([^\]]+))?\]', text)
+        if match:
+            return True, match.group(1) or ""
+        return False, ""
+
+    @staticmethod
+    def _strip_enquiry_marker(text: str) -> str:
+        """Remove all [ENQUIRY_FORM] and [ENQUIRY_FORM:...] markers from text."""
+        return re.sub(r'\s*\[ENQUIRY_FORM(?:[^\]]*)?\]\s*', '', text).strip()
+
+    async def _complete_answer(self, system_prompt: str, messages: list[dict], provider: str = "openai", model: str = "gpt-4o") -> tuple[str, bool, str]:
         api_messages = [{"role": "system", "content": system_prompt}] + messages[-MAX_HISTORY:]
         llm = get_llm(provider, model)
         response = await llm.ainvoke(api_messages)
         answer = response.content
-        show_form = "[ENQUIRY_FORM]" in answer
+        show_form, form_id = self._parse_enquiry_marker(answer)
         if show_form:
-            answer = answer.replace("[ENQUIRY_FORM]", "").strip()
-        return answer, show_form
+            answer = self._strip_enquiry_marker(answer)
+        return answer, show_form, form_id
 
     async def _complete_answer_stream(self, system_prompt: str, messages: list[dict], provider: str = "openai", model: str = "gpt-4o"):
         """Stream answer tokens. Yields token strings, then yields a final dict with metadata."""
@@ -433,16 +469,16 @@ class ChatService:
         llm = get_llm(provider, model)
         full_answer = ""
         show_form = False
+        form_id = ""
         async for token in llm.astream(api_messages):
             full_answer += token
-            if "[ENQUIRY_FORM]" in full_answer:
-                show_form = True
+            show_form, form_id = self._parse_enquiry_marker(full_answer)
             # Only yield if no enquiry form marker yet (avoid streaming the marker)
             if not show_form:
                 yield token
         if show_form:
-            full_answer = full_answer.replace("[ENQUIRY_FORM]", "").strip()
-        yield {"answer": full_answer, "show_form": show_form}
+            full_answer = self._strip_enquiry_marker(full_answer)
+        yield {"answer": full_answer, "show_form": show_form, "form_id": form_id}
 
     async def _load_conversation_context(self, session_id: str) -> tuple[str, list[dict]]:
         cache_key = get_redis_key(f"chat_session:{session_id}")

@@ -189,6 +189,12 @@ class ApiClient {
     });
   }
 
+  public getLeadFormById(formId: string): Promise<LeadFormConfig | null> {
+    return this.request<LeadFormConfig | null>(`/widget/lead-form/${formId}`, {
+      method: "GET",
+    });
+  }
+
   public submitFeedback(messageId: string, sessionId: string, rating: 'like' | 'dislike'): Promise<any> {
     return this.request<any>("/feedback", {
       method: "POST",
@@ -204,6 +210,9 @@ export const getWidgetConfig = () =>
 
 export const submitEnquiry = (data: EnquiryData) =>
   apiClient.submitEnquiry(data);
+
+export const getLeadFormById = (formId: string) =>
+  apiClient.getLeadFormById(formId);
 
 export const submitFeedback = (messageId: string, sessionId: string, rating: 'like' | 'dislike') =>
   apiClient.submitFeedback(messageId, sessionId, rating);

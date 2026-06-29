@@ -42,6 +42,7 @@ class ChatResponse(BaseModel):
     answer: str
     sources: List[ChatSource]
     show_enquiry_form: bool = False
+    enquiry_form_id: str = ""
 
 
 class WidgetConfigResponse(BaseModel):

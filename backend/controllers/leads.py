@@ -179,6 +179,15 @@ async def get_widget_lead_form(current_tenant: dict = Depends(verify_api_key)):
     return _config_to_response(config)
 
 
+@router.get("/widget/lead-form/{form_id}")
+async def get_widget_lead_form_by_id(form_id: str, current_tenant: dict = Depends(verify_api_key)):
+    tenant_id = current_tenant["tenant_id"]
+    config = await form_config_repo.get_by_form_id(tenant_id, form_id)
+    if not config or not config.get("enabled", True):
+        return None
+    return _config_to_response(config)
+
+
 # ──────────────────────────────────────────────
 #  Submit lead (supports both legacy + dynamic)
 # ──────────────────────────────────────────────

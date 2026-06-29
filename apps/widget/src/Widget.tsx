@@ -230,10 +230,15 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
               const updated = [...prev];
               const idx = updated.length - 1;
               if (updated[idx].role === 'assistant') {
-                updated[idx] = { ...updated[idx], showEnquiryForm: true };
+                updated[idx] = { ...updated[idx], showEnquiryForm: true, enquiryFormId: msg.form_id || '' };
               }
               return updated;
             });
+            if (msg.form_id) {
+              apiClient.getLeadFormById(msg.form_id).then(form => {
+                if (form) setLeadFormConfig(form);
+              }).catch(() => {});
+            }
             break;
 
           case 'done':

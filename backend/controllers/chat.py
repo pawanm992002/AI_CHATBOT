@@ -99,6 +99,7 @@ async def chat(
         answer=result.answer,
         sources=result.sources,
         show_enquiry_form=result.show_enquiry_form,
+        enquiry_form_id=result.enquiry_form_id,
     )
 
 
@@ -215,7 +216,7 @@ async def websocket_chat(websocket: WebSocket, key_hash: str = Query(...)):
                 })
 
             if result.show_enquiry_form:
-                await websocket.send_json({"type": "enquiry_form"})
+                await websocket.send_json({"type": "enquiry_form", "form_id": result.enquiry_form_id})
             await websocket.send_json({"type": "done", "message_id": result.message_id})
 
     except WebSocketDisconnect:

@@ -47,6 +47,12 @@ class LeadFormConfigRepository:
             {"tenant_id": tenant_id, "enabled": True}, {"_id": 0}
         )
 
+    async def get_all_enabled_for_tenant(self, tenant_id: str) -> List[Dict[str, Any]]:
+        cursor = self.collection.find(
+            {"tenant_id": tenant_id, "enabled": True}, {"_id": 0}
+        )
+        return await cursor.to_list(length=20)
+
     async def update(self, tenant_id: str, form_id: str, update_data: Dict[str, Any]) -> bool:
         result = await self.collection.update_one(
             {"tenant_id": tenant_id, "form_id": form_id},
