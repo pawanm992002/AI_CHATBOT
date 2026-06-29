@@ -4,7 +4,7 @@ import json
 import re
 
 from core.auth import db
-from core.redis import redis_client
+from core.redis import redis_client, get_redis_key
 from services.embedder import embed_text
 from services.llm.factory import get_llm
 from services.vector_search import search_chunks
@@ -445,7 +445,7 @@ class ChatService:
         yield {"answer": full_answer, "show_form": show_form}
 
     async def _load_conversation_context(self, session_id: str) -> tuple[str, list[dict]]:
-        cache_key = f"chat_session:{session_id}"
+        cache_key = get_redis_key(f"chat_session:{session_id}")
         try:
             cached_data_str = await redis_client.get(cache_key)
             if cached_data_str:
@@ -467,7 +467,7 @@ class ChatService:
         return summary, messages
 
     async def _persist_conversation(self, turn: ChatTurnInput, summary: str, messages: list[dict]) -> None:
-        cache_key = f"chat_session:{turn.session_id}"
+        cache_key = get_redis_key(f"chat_session:{turn.session_id}")
         await db.conversations.update_one(
             {"session_id": turn.session_id},
             {"$set": {

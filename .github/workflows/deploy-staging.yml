@@ -1,18 +1,18 @@
-name: Deploy
+name: Deploy Staging
 
 on:
   push:
     branches:
-      - master
+      - staging
 
 concurrency:
-  group: deploy-production
+  group: deploy-staging
   cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    # environment: production
+    # environment: staging
 
     steps:
       - name: Checkout
@@ -67,19 +67,19 @@ jobs:
             export PNPM_HOME="$HOME/.local/share/pnpm"
             export PATH="$PNPM_HOME:$HOME/.local/bin:$PATH"
 
-            cd "${{ vars.APP_PATH }}"
+            cd "${{ vars.APP_PATH_STAGING }}"
 
-            git fetch origin master
-            git reset --hard origin/master
+            git fetch origin staging
+            git reset --hard origin/staging
             git clean -fdx -e .env -e node_modules
 
             pnpm install --frozen-lockfile
             pnpm build
             uv sync --frozen
 
-            pm2 startOrReload ecosystem.config.js --only ai-chatbot-backend --env production
+            pm2 startOrReload ecosystem.config.js --only ai-chatbot-backend-staging
             pm2 save
 
             # basic health check, fail the deploy if app doesn't come up
             sleep 3
-            curl -sf http://localhost:8000/health || (echo "Health check failed" && exit 1)
+            curl -sf http://localhost:8001/health || (echo "Health check failed" && exit 1)
