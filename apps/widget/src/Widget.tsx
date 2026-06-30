@@ -3,6 +3,7 @@ import { submitEnquiry, getWidgetConfig, submitFeedback, apiClient, LeadFormConf
 import { WidgetProps, Message, useIsMobile, useStyleInjection } from '@chatbot/shared';
 import { getPalette } from './utils/theme';
 import { useHostTheme } from './hooks/useHostTheme';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Header } from './components/Header';
 import { FloatingButton } from './components/FloatingButton';
 import { MessageList } from './components/MessageList';
@@ -230,12 +231,12 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
               const updated = [...prev];
               const idx = updated.length - 1;
               if (updated[idx].role === 'assistant') {
-                updated[idx] = { ...updated[idx], showEnquiryForm: true, enquiryFormId: msg.form_id || '' };
+                updated[idx] = { ...updated[idx], showEnquiryForm: true, enquiryFormId: data.form_id || '' };
               }
               return updated;
             });
-            if (msg.form_id) {
-              apiClient.getLeadFormById(msg.form_id).then(form => {
+            if (data.form_id) {
+              apiClient.getLeadFormById(data.form_id).then(form => {
                 if (form) setLeadFormConfig(form);
               }).catch(() => {});
             }
@@ -447,18 +448,20 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
             ) : (
               <>
                 <div className="flex-1 flex flex-col overflow-hidden relative">
-                  <MessageList
-                    messages={messages}
-                    suggestedQuestions={suggestedQuestions}
-                    accent={accent}
-                    isDark={isDark}
-                    palette={palette}
-                    onSend={handleSend}
-                    onFeedback={handleFeedback}
-                    onEnquirySubmit={handleEnquirySubmit}
-                    showSources={showSources}
-                    leadFormConfig={leadFormConfig}
-                  />
+                  <ErrorBoundary>
+                    <MessageList
+                      messages={messages}
+                      suggestedQuestions={suggestedQuestions}
+                      accent={accent}
+                      isDark={isDark}
+                      palette={palette}
+                      onSend={handleSend}
+                      onFeedback={handleFeedback}
+                      onEnquirySubmit={handleEnquirySubmit}
+                      showSources={showSources}
+                      leadFormConfig={leadFormConfig}
+                    />
+                  </ErrorBoundary>
 
                   <div ref={messagesEndRef} />
                 </div>

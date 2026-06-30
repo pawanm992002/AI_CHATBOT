@@ -221,13 +221,34 @@ async def submit_lead(req: LeadSubmitRequest, request: Request, current_tenant: 
     if req.phone and "phone" not in custom_fields:
         custom_fields["phone"] = req.phone
 
+    # Extract standard fields from custom_fields using form field definitions
+    # This handles dynamic field IDs (field_1, field_2, etc.) by matching labels
+    name = req.name or custom_fields.get("name", "")
+    email = req.email or custom_fields.get("email", "")
+    phone = req.phone or custom_fields.get("phone", "")
+
+    if req.form_id and not (name and email):
+        form_config = await form_config_repo.get_by_form_id(tenant_id, req.form_id)
+        if form_config:
+            for field in form_config.get("fields", []):
+                fid = field.get("field_id", "")
+                label = field.get("label", "").lower()
+                ftype = field.get("type", "")
+                val = custom_fields.get(fid, "")
+                if not name and ("name" in label or ftype == "name"):
+                    name = val
+                elif not email and ("email" in label or ftype == "email"):
+                    email = val
+                elif not phone and ("phone" in label or "mobile" in label or "contact" in label or ftype == "phone"):
+                    phone = val
+
     lead = {
         "lead_id": str(uuid.uuid4()),
         "tenant_id": tenant_id,
         "session_id": req.session_id,
-        "name": req.name or custom_fields.get("name", ""),
-        "email": req.email or custom_fields.get("email", ""),
-        "phone": req.phone or custom_fields.get("phone", ""),
+        "name": name,
+        "email": email,
+        "phone": phone,
         "message": summary,
         "raw_context": req.message or "",
         "source_url": "",

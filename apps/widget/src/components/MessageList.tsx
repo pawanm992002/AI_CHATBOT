@@ -5,6 +5,7 @@ import { Palette } from '../utils/theme';
 import { EnquiryForm } from './EnquiryForm';
 import { LeadFormConfig } from '../api';
 import { SCROLL_INTO_VIEW_DELAY } from '../utils/constants';
+import { ErrorBoundary } from './ErrorBoundary';
 
 interface MessageListProps {
   messages: Message[];
@@ -274,12 +275,14 @@ export function MessageList({
 
           {/* Enquiry form */}
           {m.showEnquiryForm && !m.enquirySubmitted && (
-            <EnquiryForm
-              accent={accent}
-              palette={palette}
-              formConfig={leadFormConfig}
-              onSubmit={(formData) => onEnquirySubmit(i, formData)}
-            />
+            <ErrorBoundary>
+              <EnquiryForm
+                accent={accent}
+                palette={palette}
+                formConfig={leadFormConfig}
+                onSubmit={(formData) => onEnquirySubmit(i, formData)}
+              />
+            </ErrorBoundary>
           )}
 
           {/* Enquiry submitted confirmation */}

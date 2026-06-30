@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, Sequence
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 
 from core.config import settings
 
@@ -21,7 +21,10 @@ def _normalize_model(model: str | None) -> str:
 
 
 def _to_lc_messages(messages: list[dict[str, Any]]):
-    """Convert role/content dicts to LangChain message objects."""
+    """Convert role/content dicts to LangChain message objects.
+
+    Handles system, human, assistant (with optional tool_calls), and tool roles.
+    """
     lc_messages = []
     for m in messages:
         role = (m.get("role") or "").strip()
@@ -30,8 +33,16 @@ def _to_lc_messages(messages: list[dict[str, Any]]):
             continue
         if role == "system":
             lc_messages.append(SystemMessage(content=content))
+        elif role == "tool":
+            lc_messages.append(ToolMessage(
+                content=content,
+                tool_call_id=m.get("tool_call_id", ""),
+            ))
         elif role == "assistant":
-            lc_messages.append(AIMessage(content=content))
+            msg = AIMessage(content=content)
+            if m.get("tool_calls"):
+                msg.tool_calls = m["tool_calls"]
+            lc_messages.append(msg)
         else:
             lc_messages.append(HumanMessage(content=content))
     return lc_messages
@@ -42,14 +53,14 @@ class _LLMWrapper:
     """Wraps a LangChain BaseChatModel to accept dict messages (backward compat)."""
     _llm: BaseChatModel
 
-    async def ainvoke(self, messages: list[dict[str, Any]]) -> Any:
+    async def ainvoke(self, messages: list[dict[str, Any]], **kwargs) -> Any:
         lc_messages = _to_lc_messages(messages)
-        return await self._llm.ainvoke(lc_messages)
+        return await self._llm.ainvoke(lc_messages, **kwargs)
 
-    async def astream(self, messages: list[dict[str, Any]]) -> AsyncGenerator[str, None]:
+    async def astream(self, messages: list[dict[str, Any]], **kwargs) -> AsyncGenerator[str, None]:
         """Stream tokens from the LLM, yielding each token string."""
         lc_messages = _to_lc_messages(messages)
-        async for chunk in self._llm.astream(lc_messages):
+        async for chunk in self._llm.astream(lc_messages, **kwargs):
             if chunk.content and isinstance(chunk.content, str):
                 yield chunk.content
 
@@ -106,3 +117,8 @@ def get_llm(provider: str, model: str) -> _LLMWrapper:
             ))
         except Exception as e2:
             raise RuntimeError(f"LLM fallback to OpenAI failed: {e2!r}") from e2
+
+
+def get_llm_raw(provider: str, model: str) -> BaseChatModel:
+    """Return the raw LangChain BaseChatModel for bind_tools() usage."""
+    return get_llm(provider, model)._llm

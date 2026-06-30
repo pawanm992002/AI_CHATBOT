@@ -722,22 +722,24 @@ The platform includes a **dynamic lead form builder** that lets tenants create c
    - Configure **trigger instructions** — natural language rules telling the AI when to show the form
    - Enable/disable the form entirely
 
-2. **Widget Rendering** — On load, the widget fetches the active form config from `GET /widget/lead-form`. When the LLM detects lead intent, it appends `[ENQUIRY_FORM]` to its response. The widget renders the dynamic form based on the config.
+2. **Widget Rendering** — On load, the widget fetches active form configs from `GET /widget/lead-forms`. The LLM is bound with a `show_enquiry_form` tool containing the tenant's available forms. When the LLM detects lead intent, it emits a `tool_call` with the relevant `form_id`. The backend validates the form exists and is enabled before sending it to the widget.
 
 3. **Lead Storage** — On form submit, all field values are stored as `custom_fields` (a flexible `Record<string, string>`), along with the AI-summarized conversation context.
 
 ### Flow
 
 ```
-Tenant: Configures form in Dashboard → Form Builder tab
+Tenant: Configures form in Dashboard → Leads → Form Builder
   → Sets fields (name, email, company, budget, etc.)
-  → Sets trigger: "the user is asking about pricing, demo, or wants a consultation"
+  → Sets trigger instructions: "the user is asking about pricing, demo, or wants a consultation"
   → Saves form config to MongoDB
 
 Visitor: "Can I get a quote for 50 users?"
-  → GPT-4o detects lead intent (based on tenant's trigger instructions)
-  → Appends [ENQUIRY_FORM] to response
-  → Backend strips marker, returns show_enquiry_form: true
+  → LLM receives tool binding with available forms + trigger descriptions
+  → LLM streams text response normally
+  → LLM emits show_enquiry_form tool_call with form_id
+  → Backend validates form_id exists and is enabled
+  → Backend sends { type: "enquiry_form", form_id: "..." } to widget
   → Widget fetches form config, renders dynamic form
   → Visitor fills form → POST /leads → saved to MongoDB with custom_fields
   → Dashboard "Leads" page lists all submissions
@@ -758,8 +760,9 @@ Visitor: "Can I get a quote for 50 users?"
 | **Backward Compatible** | Falls back to default 3-field form if no config exists |
 
 ### Key Details
-- **Intent detection**: Done by GPT-4o using the tenant's custom trigger instructions. Works across greeting, RAG, and no-results paths.
-- **Custom trigger instructions**: Tenants write natural language rules like "the user is asking about pricing, demo, or wants a consultation" — the AI uses these to decide when to show the form.
+- **Intent detection via tool calling**: The LLM is bound with a `show_enquiry_form` tool whose schema includes the tenant's available forms and their trigger instructions in the `description` field. The LLM decides autonomously whether to call the tool based on user intent — no text markers or sentinel strings involved.
+- **Form validation**: The backend validates `form_id` against MongoDB before sending `enquiry_form` to the widget. Disabled or non-existent forms are silently skipped.
+- **Error boundary**: A React `ErrorBoundary` wraps the enquiry form render in the widget, preventing a form rendering crash from killing the entire WebSocket connection.
 - **Conversation summarization**: On form submit, `gpt-4o-mini` summarizes the conversation context into a concise description of what the lead was interested in. Raw context is also preserved (`raw_context` field).
 - **Dynamic field storage**: All custom field values are stored in `custom_fields` as a flat key-value map, making it flexible for any form configuration.
 
@@ -783,14 +786,14 @@ Three layers of rate limiting protect the chat endpoint:
 
 | Layer | Scope | Limit | Mechanism | Purpose |
 |-------|-------|-------|-----------|---------|
-| **Per-IP** | Client IP address | 60 req/min | slowapi (`@limiter.limit`) | Catches individual bad actors bypassing session ID |
-| **Per-tenant** | API key / tenant ID | 100 req/min | In-memory sliding window (`deque`) | All real users + attackers combined. Protects costs. |
-| **Per-session** | `chat_session_id` cookie | 20 req/min | In-memory sliding window (`deque`) | Stops a single abusive user |
+| **Per-IP** | Client IP address | 60 req/min | Redis sorted sets (sliding window) | Catches individual bad actors bypassing session ID |
+| **Per-tenant** | API key / tenant ID | 100 req/min | Redis sorted sets (sliding window) | All real users + attackers combined. Protects costs. |
+| **Per-session** | `chat_session_id` cookie | 20 req/min | Redis sorted sets (sliding window) | Stops a single abusive user |
 | **Max query length** | All requests | 500 chars | Rejected with 400 | Prevents token waste on huge inputs |
 
 The per-IP and per-session limits catch individual bad actors. The per-tenant limit is the critical defense — since the API key is visible in the widget's script tag, a distributed attack using the same key from many IPs would bypass per-IP limits but is still blocked by the per-tenant sliding window.
 
-In-memory counters reset on server restart. For production at scale, replace with Redis-backed rate limiting.
+All rate limiters use Redis sorted sets with TTL-based expiry for automatic cleanup. Implementation in `backend/core/rate_limiter.py`.
 
 ## Session Management & History Compaction
 
@@ -852,9 +855,9 @@ If search returns zero results for a non-greeting query, the system classifies t
 ### Rate Limiting (3 Layers)
 | Layer | Scope | Limit | Mechanism |
 |---|---|---|---|
-| Per-IP | Client IP | 60 req/min | slowapi |
-| Per-tenant | API key | 100 req/min | In-memory deque |
-| Per-session | `chat_session_id` | 20 req/min | In-memory deque |
+| Per-IP | Client IP | 60 req/min | Redis sorted sets |
+| Per-tenant | API key | 100 req/min | Redis sorted sets |
+| Per-session | `chat_session_id` | 20 req/min | Redis sorted sets |
 
 ## Admin Dashboard
 
@@ -898,7 +901,7 @@ The embeddable chat widget (`apps/widget/`) is built as a self-executing IIFE bu
 - **WebSocket streaming** — Real-time token-by-token responses via `/ws/chat`
 - **Chat history persistence** — Stored in `sessionStorage` with 24-hour expiry
 - **Session management** — `chat_session_id` cookie for conversation continuity
-- **Enquiry form** — Dynamic lead capture form (configurable via dashboard Form Builder)
+- **Enquiry form** — Dynamic lead capture form via LLM tool calling (configurable via dashboard Form Builder)
 - **Like/dislike feedback** — Thumbs-up/down on every AI response
 - **Suggested questions** — Clickable chips shown on empty chat
 - **Source citations** — Toggleable per-tenant via `show_sources` setting
@@ -929,7 +932,7 @@ The embeddable chat widget (`apps/widget/`) is built as a self-executing IIFE bu
 | Embeddings | LangChain (OpenAIEmbeddings) |
 | PDF Parsing | PyMuPDF (fitz) |
 | Token Counting | tiktoken (`cl100k_base`) |
-| Rate Limiting | slowapi (per-IP) + in-memory deque (per-tenant, per-session) |
+| Rate Limiting | Redis sorted sets (sliding window) — per-IP, per-tenant, per-session |
 | Process Manager | PM2 |
 | Reverse Proxy | Nginx |
 | CI/CD | GitHub Actions (EC2 deployment) |
@@ -1031,7 +1034,7 @@ The embeddable chat widget (`apps/widget/`) is built as a self-executing IIFE bu
 | POST | `/api/lead-forms` | JWT | Create a new lead form config |
 | PUT | `/api/lead-forms/{form_id}` | JWT | Update a lead form config |
 | DELETE | `/api/lead-forms/{form_id}` | JWT | Delete a lead form config |
-| GET | `/api/widget/lead-form` | API Key | Get active lead form config for widget |
+| GET | `/api/widget/lead-forms` | API Key | Get all active lead form configs for widget |
 
 ### System Admin
 | Method | Endpoint | Auth | Description |
