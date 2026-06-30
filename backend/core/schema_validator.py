@@ -244,6 +244,8 @@ COLLECTION_SCHEMAS = {
                     "tenant_id": {"bsonType": "string"},
                     "current_url": {"bsonType": "string"},
                     "summary": {"bsonType": "string"},
+                    "created_at": {"bsonType": ["date", "null"]},
+                    "updated_at": {"bsonType": ["date", "null"]},
                     "messages": {
                         "bsonType": "array",
                         "items": {

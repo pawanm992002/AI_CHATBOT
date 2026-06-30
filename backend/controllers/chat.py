@@ -14,6 +14,12 @@ router = APIRouter(tags=["chat"])
 chat_service = ChatService()
 _form_config_repo = LeadFormConfigRepository()
 
+
+def _client_ip(request: Request) -> str:
+    if request.client:
+        return request.client.host
+    return request.headers.get("x-forwarded-for", "0.0.0.0").split(",")[0].strip()
+
 MAX_QUERY_LENGTH = 500
 PER_TENANT_RATE_LIMIT = 100
 PER_SESSION_RATE_LIMIT = 20
@@ -94,11 +100,22 @@ async def chat(
         )
     )
 
+    if result.show_enquiry_form and result.enquiry_form_id:
+        valid_form = await _form_config_repo.get_by_form_id(
+            current_tenant["tenant_id"], result.enquiry_form_id
+        )
+        if not valid_form or not valid_form.get("enabled", True):
+            result.show_enquiry_form = False
+            result.enquiry_form_id = ""
+            if result.answer == "Let me get that for you!":
+                result.answer = "Let me help you with that."
+
     return ChatResponse(
         message_id=result.message_id,
         answer=result.answer,
         sources=result.sources,
         show_enquiry_form=result.show_enquiry_form,
+        enquiry_form_id=result.enquiry_form_id,
     )
 
 
@@ -214,9 +231,18 @@ async def websocket_chat(websocket: WebSocket, key_hash: str = Query(...)):
                     "data": [source.model_dump() for source in result.sources],
                 })
 
-            if result.show_enquiry_form:
-                await websocket.send_json({"type": "enquiry_form"})
-            await websocket.send_json({"type": "done", "message_id": result.message_id})
+            if result.show_enquiry_form and result.enquiry_form_id:
+                valid_form = await _form_config_repo.get_by_form_id(
+                    tenant["tenant_id"], result.enquiry_form_id
+                )
+                if valid_form and valid_form.get("enabled", True):
+                    await websocket.send_json({"type": "enquiry_form", "form_id": result.enquiry_form_id})
+                else:
+                    result.show_enquiry_form = False
+                    result.enquiry_form_id = ""
+                    if result.answer == "Let me get that for you!":
+                        result.answer = "Let me help you with that."
+            await websocket.send_json({"type": "done", "message_id": result.message_id, "answer": result.answer})
 
     except WebSocketDisconnect:
         print("[WS] Client disconnected")

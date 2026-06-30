@@ -32,7 +32,6 @@ NO_MATCH_WITH_DESCRIPTION_PROMPT = (
     "Do not switch to a generic website overview. Do not make up information beyond what is provided. "
     "CRITICAL: You MUST ONLY reply in English or Hinglish. If the user writes in English, reply in English. "
     "If the user writes in Hinglish, reply in Hinglish. NEVER use any other language. "
-    "{enquiry_form_instruction}"
     "Otherwise, politely say you don't have that information."
 )
 
@@ -40,8 +39,7 @@ NO_MATCH_GENERIC_PROMPT = (
     'You are a representative of {business_name} - always speak as "we" and "our", never as "{business_name}" or a third party.\n'
     "You do not have information about this question. Politely say you don't have that information and suggest the user contact us for more details. "
     "CRITICAL: You MUST ONLY reply in English or Hinglish. If the user writes in English, reply in English. "
-    "If the user writes in Hinglish, reply in Hinglish. NEVER use any other language. "
-    "{enquiry_form_instruction}"
+    "If the user writes in Hinglish, reply in Hinglish. NEVER use any other language."
 )
 
 FOLLOWUP_NO_MATCH_PROMPT = (
@@ -61,7 +59,6 @@ ANSWER_WITH_CONTEXT_PROMPT = (
     "CRITICAL: You MUST ONLY reply in English or Hinglish. If the user writes in English, reply in English. "
     "If the user writes in Hinglish, reply in Hinglish. NEVER use any other language. "
     "Ignore the language of the context above - always respond in the user's language from the allowed set.\n"
-    "{enquiry_form_instruction}"
     "IMPORTANT: If the context contains a specific URL for registration, signup, login, purchase, or any action the user is asking about, include that URL inline in your response. Do not just mention the website name - provide the exact full URL from the context."
 )
 
@@ -69,8 +66,7 @@ DIRECT_ANSWER_PROMPT = (
     'You are a representative of {business_name}. Respond conversationally to the user using "we" and "our", never referring to yourself as a third party. '
     "Do not answer questions unrelated to {business_name}. "
     "CRITICAL: You MUST ONLY reply in English or Hinglish. If the user writes in English, reply in English. "
-    "If the user writes in Hinglish, reply in Hinglish. NEVER use any other language. "
-    "{enquiry_form_instruction}"
+    "If the user writes in Hinglish, reply in Hinglish. NEVER use any other language."
 )
 
 NO_MATCH_EVALUATOR_PROMPT = (
@@ -94,8 +90,4 @@ SUMMARY_PROMPT = (
     "New Conversation Segment:\n{formatted_history}\n\nNew Summary:"
 )
 
-DEFAULT_ENQUIRY_FORM_INSTRUCTION = (
-    "However, if the user is asking about pricing, demo, purchasing, or wants to be contacted, offer to help and at the end of your response append [ENQUIRY_FORM]. "
-)
 
-NO_ENQUIRY_FORM_INSTRUCTION = ""

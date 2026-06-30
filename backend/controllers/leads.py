@@ -179,6 +179,15 @@ async def get_widget_lead_form(current_tenant: dict = Depends(verify_api_key)):
     return _config_to_response(config)
 
 
+@router.get("/widget/lead-form/{form_id}")
+async def get_widget_lead_form_by_id(form_id: str, current_tenant: dict = Depends(verify_api_key)):
+    tenant_id = current_tenant["tenant_id"]
+    config = await form_config_repo.get_by_form_id(tenant_id, form_id)
+    if not config or not config.get("enabled", True):
+        return None
+    return _config_to_response(config)
+
+
 # ──────────────────────────────────────────────
 #  Submit lead (supports both legacy + dynamic)
 # ──────────────────────────────────────────────
@@ -212,13 +221,34 @@ async def submit_lead(req: LeadSubmitRequest, request: Request, current_tenant: 
     if req.phone and "phone" not in custom_fields:
         custom_fields["phone"] = req.phone
 
+    # Extract standard fields from custom_fields using form field definitions
+    # This handles dynamic field IDs (field_1, field_2, etc.) by matching labels
+    name = req.name or custom_fields.get("name", "")
+    email = req.email or custom_fields.get("email", "")
+    phone = req.phone or custom_fields.get("phone", "")
+
+    if req.form_id and not (name and email):
+        form_config = await form_config_repo.get_by_form_id(tenant_id, req.form_id)
+        if form_config:
+            for field in form_config.get("fields", []):
+                fid = field.get("field_id", "")
+                label = field.get("label", "").lower()
+                ftype = field.get("type", "")
+                val = custom_fields.get(fid, "")
+                if not name and ("name" in label or ftype == "name"):
+                    name = val
+                elif not email and ("email" in label or ftype == "email"):
+                    email = val
+                elif not phone and ("phone" in label or "mobile" in label or "contact" in label or ftype == "phone"):
+                    phone = val
+
     lead = {
         "lead_id": str(uuid.uuid4()),
         "tenant_id": tenant_id,
         "session_id": req.session_id,
-        "name": req.name or custom_fields.get("name", ""),
-        "email": req.email or custom_fields.get("email", ""),
-        "phone": req.phone or custom_fields.get("phone", ""),
+        "name": name,
+        "email": email,
+        "phone": phone,
         "message": summary,
         "raw_context": req.message or "",
         "source_url": "",
@@ -233,7 +263,26 @@ async def submit_lead(req: LeadSubmitRequest, request: Request, current_tenant: 
 
 
 @router.get("/dashboard/leads")
-async def list_leads(current_tenant: dict = Depends(get_current_tenant)):
+async def list_leads(
+    page: int = 1,
+    page_size: int = 20,
+    form_id: str | None = None,
+    current_tenant: dict = Depends(get_current_tenant),
+):
     tenant_id = current_tenant["tenant_id"]
-    leads = await lead_repo.get_by_tenant(tenant_id)
-    return leads
+    skip = (page - 1) * page_size
+
+    if form_id:
+        leads = await lead_repo.get_by_tenant_and_form(tenant_id, form_id, skip=skip, limit=page_size)
+        total = await lead_repo.count_by_tenant_and_form(tenant_id, form_id)
+    else:
+        leads = await lead_repo.get_by_tenant(tenant_id, skip=skip, limit=page_size)
+        total = await lead_repo.count_by_tenant(tenant_id)
+
+    return {
+        "items": leads,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": max(1, -(-total // page_size)),
+    }

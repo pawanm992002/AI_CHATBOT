@@ -26,7 +26,7 @@ class TenantRepository:
             {"tenant_id": tenant_id},
             {"$set": update_data}
         )
-        return result.modified_count > 0
+        return result.matched_count > 0
 
     async def update_api_key_hash(self, tenant_id: str, api_key_hash: str) -> bool:
         result = await self.collection.update_one(

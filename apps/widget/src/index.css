@@ -25,3 +25,20 @@
   padding: 0;
   border: 0 solid transparent;
 }
+
+#chat-widget-container select {
+  background-color: rgba(255, 255, 255, 0.05);
+  color: #f1f5f9;
+}
+
+#chat-widget-container select option {
+  background-color: #1e293b;
+  color: #f1f5f9;
+  padding: 8px 12px;
+}
+
+#chat-widget-container select option:hover,
+#chat-widget-container select option:checked {
+  background-color: #334155;
+  color: #ffffff;
+}

@@ -157,92 +157,14 @@ const AIProvider = () => {
                   disabled={!isEditor || !selectedProvider}
                   className="w-full rounded-xl border border-slate-800 bg-slate-950 px-4 py-2.5 text-xs text-slate-200 focus:border-violet-600 focus:outline-none transition-all cursor-pointer disabled:opacity-50"
                 >
-                  {selectedProvider === 'openai' && (
-                    <>
-                      <optgroup label="GPT-5.5 (Frontier)">
-                        <option value="gpt-5.5">GPT-5.5 — $5.00/$30.00 per 1M tokens</option>
-                      </optgroup>
-                      <optgroup label="GPT-5.4 (Mainstream)">
-                        <option value="gpt-5.4">GPT-5.4 — $2.50/$15.00 per 1M tokens</option>
-                        <option value="gpt-5.4-mini">GPT-5.4 Mini — $0.75/$4.50 per 1M tokens</option>
-                        <option value="gpt-5.4-nano">GPT-5.4 Nano — $0.20/$1.25 per 1M tokens</option>
-                      </optgroup>
-                      <optgroup label="GPT-5 (Legacy Flagship)">
-                        <option value="gpt-5">GPT-5 — $1.25/$10.00 per 1M tokens</option>
-                        <option value="gpt-5-mini">GPT-5 Mini — $0.25/$2.00 per 1M tokens</option>
-                      </optgroup>
-                      <optgroup label="GPT-4.1 (Production)">
-                        <option value="gpt-4.1">GPT-4.1 — $2.00/$8.00 per 1M tokens</option>
-                        <option value="gpt-4.1-mini">GPT-4.1 Mini — $0.40/$1.60 per 1M tokens</option>
-                        <option value="gpt-4.1-nano">GPT-4.1 Nano — $0.10/$0.40 per 1M tokens</option>
-                      </optgroup>
-                      <optgroup label="GPT-4o (Legacy)">
-                        <option value="gpt-4o">GPT-4o — $2.50/$10.00 per 1M tokens</option>
-                        <option value="gpt-4o-mini">GPT-4o Mini — $0.15/$0.60 per 1M tokens</option>
-                      </optgroup>
-                      <optgroup label="Reasoning (o-Series)">
-                        <option value="o3">o3 — $2.00/$8.00 per 1M tokens</option>
-                        <option value="o4-mini">o4-mini — $1.10/$4.40 per 1M tokens</option>
-                        <option value="o3-pro">o3-Pro — $20.00/$80.00 per 1M tokens</option>
-                      </optgroup>
-                    </>
-                  )}
-                  {selectedProvider === 'groq' && (
-                    <>
-                      <optgroup label="Llama (Meta)">
-                        <option value="llama-3.3-70b-versatile">Llama 3.3 70B — $0.59/$0.79 per 1M tokens</option>
-                        <option value="llama-4-scout-17b-16e-instruct">Llama 4 Scout 17B — $0.11/$0.34 per 1M tokens</option>
-                        <option value="llama-4-maverick-17b-128e-instruct">Llama 4 Maverick 17B — $0.20/$0.60 per 1M tokens</option>
-                        <option value="llama-3.1-8b-instant">Llama 3.1 8B Instant — $0.05/$0.08 per 1M tokens</option>
-                      </optgroup>
-                      <optgroup label="Qwen (Alibaba)">
-                        <option value="qwen/qwen3-32b">Qwen3 32B — $0.29/$0.59 per 1M tokens</option>
-                      </optgroup>
-                      <optgroup label="GPT-OSS (OpenAI Open-Source)">
-                        <option value="openai/gpt-oss-120b">GPT-OSS 120B — $0.15/$0.60 per 1M tokens</option>
-                        <option value="openai/gpt-oss-20b">GPT-OSS 20B — $0.075/$0.30 per 1M tokens</option>
-                      </optgroup>
-                      <optgroup label="DeepSeek">
-                        <option value="deepseek-r2">DeepSeek R2 (Reasoning) — $0.70/$2.70 per 1M tokens</option>
-                      </optgroup>
-                      <optgroup label="Moonshot">
-                        <option value="moonshotai/kimi-k2-instruct-0905">Kimi K2 — $1.00/$3.00 per 1M tokens</option>
-                      </optgroup>
-                    </>
-                  )}
-                  {selectedProvider === 'openrouter' && (
-                    <>
-                      <optgroup label="DeepSeek">
-                        <option value="deepseek/deepseek-chat-v3-0324">DeepSeek V3 — $0.27/$1.10 per 1M tokens</option>
-                        <option value="deepseek/deepseek-r1">DeepSeek R1 (Reasoning) — $0.55/$2.19 per 1M tokens</option>
-                      </optgroup>
-                      <optgroup label="Anthropic">
-                        <option value="anthropic/claude-sonnet-4">Claude Sonnet 4 — $3.00/$15.00 per 1M tokens</option>
-                        <option value="anthropic/claude-haiku-3.5">Claude 3.5 Haiku — $0.80/$4.00 per 1M tokens</option>
-                      </optgroup>
-                      <optgroup label="Google">
-                        <option value="google/gemini-2.5-flash">Gemini 2.5 Flash — $0.15/$0.60 per 1M tokens</option>
-                        <option value="google/gemini-2.5-pro">Gemini 2.5 Pro — $1.25/$10.00 per 1M tokens</option>
-                      </optgroup>
-                      <optgroup label="Meta">
-                        <option value="meta-llama/llama-4-maverick">Llama 4 Maverick — $0.20/$0.60 per 1M tokens</option>
-                      </optgroup>
-                      <optgroup label="Qwen">
-                        <option value="qwen/qwen3-235b-a22b">Qwen3 235B — $0.60/$3.60 per 1M tokens</option>
-                      </optgroup>
-                      <optgroup label="Mistral">
-                        <option value="mistralai/mistral-large-2411">Mistral Large — $2.00/$6.00 per 1M tokens</option>
-                      </optgroup>
-                      <optgroup label="xAI">
-                        <option value="x-ai/grok-3-mini">Grok 3 Mini — $0.30/$0.50 per 1M tokens</option>
-                      </optgroup>
-                    </>
-                  )}
-                  {selectedProvider && selectedProvider !== 'openai' && selectedProvider !== 'groq' && selectedProvider !== 'openrouter' && models.map((m) => (
+                  {models.map((m) => (
                     <option key={m.id} value={m.id}>
                       {m.name} — ${m.input_price}/M in, ${m.output_price}/M out
                     </option>
                   ))}
+                  {models.length === 0 && selectedProvider && (
+                    <option value="" disabled>No models available</option>
+                  )}
                 </select>
               </div>
             </div>

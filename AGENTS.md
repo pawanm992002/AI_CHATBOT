@@ -81,7 +81,7 @@ Open `backend/templates/test_page.html` in a browser to test the embedded widget
 - All routes use async/await with Motor for MongoDB operations
 - Pydantic v2 for all request/response validation
 - Auth: JWT in HttpOnly cookies for tenants, API key (Bearer) for widget
-- Rate limiting: 3 layers — per-IP (slowapi), per-tenant (deque), per-session (deque)
+- Rate limiting: 3 layers — per-IP, per-tenant, per-session (Redis sorted sets, sliding window)
 - Schema validation enforced on startup via JSON Schema in `core/schema_validator.py`
 
 ### Frontend (TypeScript/React)
@@ -101,20 +101,28 @@ Open `backend/templates/test_page.html` in a browser to test the embedded widget
 |---|---|
 | `backend/core/config.py` | Pydantic Settings, env variable loading |
 | `backend/core/auth.py` | JWT creation/verification, API key auth, rate limiter |
-| `backend/services/chat_service.py` | Core chat pipeline (classify, search, answer, log gaps) |
+| `backend/services/chat_service.py` | Core chat pipeline (classify, search, answer, tool calling for lead forms, log gaps) |
 | `backend/services/vector_search.py` | Hybrid vector + BM25 search |
 | `backend/services/ingestion.py` | Document chunking/embedding pipeline |
 | `backend/services/embedder.py` | OpenAI embeddings via LangChain `OpenAIEmbeddings` |
-| `backend/services/llm/factory.py` | Provider-agnostic LLM factory (OpenAI, Groq, OpenRouter) |
+| `backend/services/llm/factory.py` | Provider-agnostic LLM factory (OpenAI, Groq, OpenRouter) — `get_llm()`, `get_llm_raw()`, `_to_lc_messages()`, `extract_usage()` |
+| `backend/services/llm/pricing.py` | Centralized LLM pricing table and `calculate_cost()` for cost estimation |
+| `backend/services/admin_analytics_service.py` | MongoDB aggregation pipelines for platform-wide analytics (overview, timeseries, per-tenant, model leaderboard) |
+| `backend/core/rate_limiter.py` | Redis-based sliding window rate limiter (per-IP, per-tenant, per-session) |
+| `apps/widget/src/components/ErrorBoundary.tsx` | React error boundary preventing widget crashes from killing WebSocket |
 | `backend/core/schema_validator.py` | MongoDB JSON schema validators (15 collections) |
 | `apps/widget/src/Widget.tsx` | Main widget component (WebSocket streaming) |
 | `apps/widget/src/index.tsx` | Widget bootstrapper (reads `data-api-key` from script tag) |
 | `apps/dashboard/src/App.tsx` | Dashboard router with private/admin routes |
+| `apps/dashboard/src/pages/AdminAnalytics.tsx` | Platform-wide analytics page (KPIs, charts, model leaderboard, tenant search) |
+| `apps/dashboard/src/pages/TenantAnalytics.tsx` | Per-tenant analytics drill-down page |
+| `apps/dashboard/src/components/analytics/TenantSelector.tsx` | Reusable tenant search dropdown component |
+| `apps/dashboard/src/components/analytics/ModelUsageTable.tsx` | Per-model token/cost/latency breakdown table |
 | `packages/shared/src/types.ts` | Shared TypeScript interfaces |
 
 ## Database Collections
 
-`tenants`, `sources`, `crawl_jobs`, `source_jobs`, `faqs`, `documents`, `chunks`, `parents`, `pages`, `leads`, `conversations`, `visitors`, `message_feedback`, `knowledge_gaps`
+`tenants`, `sources`, `crawl_jobs`, `source_jobs`, `faqs`, `documents`, `chunks`, `parents`, `pages`, `leads`, `lead_form_configs`, `conversations`, `visitors`, `message_feedback`, `knowledge_gaps`
 
 ## Environment Variables
 

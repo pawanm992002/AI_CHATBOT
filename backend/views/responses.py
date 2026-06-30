@@ -42,6 +42,7 @@ class ChatResponse(BaseModel):
     answer: str
     sources: List[ChatSource]
     show_enquiry_form: bool = False
+    enquiry_form_id: str = ""
 
 
 class WidgetConfigResponse(BaseModel):
@@ -101,6 +102,7 @@ class TenantResponse(BaseModel):
     suggested_questions_manual: List[str] = []
     suggested_questions_auto: List[str] = []
     show_sources: bool = True
+    ai: Optional[dict] = None
 
 
 class CrawlJobStatusResponse(BaseModel):

@@ -21,6 +21,15 @@ class LeadRepository:
     async def count_by_tenant(self, tenant_id: str) -> int:
         return await self.collection.count_documents({"tenant_id": tenant_id})
 
+    async def count_by_tenant_and_form(self, tenant_id: str, form_id: str) -> int:
+        return await self.collection.count_documents({"tenant_id": tenant_id, "form_id": form_id})
+
+    async def get_by_tenant_and_form(self, tenant_id: str, form_id: str, skip: int = 0, limit: int = 20) -> list:
+        cursor = self.collection.find(
+            {"tenant_id": tenant_id, "form_id": form_id}, {"_id": 0}
+        ).sort("created_at", -1).skip(skip).limit(limit)
+        return await cursor.to_list(length=limit)
+
 
 class LeadFormConfigRepository:
     def __init__(self):
@@ -46,6 +55,12 @@ class LeadFormConfigRepository:
         return await self.collection.find_one(
             {"tenant_id": tenant_id, "enabled": True}, {"_id": 0}
         )
+
+    async def get_all_enabled_for_tenant(self, tenant_id: str) -> List[Dict[str, Any]]:
+        cursor = self.collection.find(
+            {"tenant_id": tenant_id, "enabled": True}, {"_id": 0}
+        )
+        return await cursor.to_list(length=20)
 
     async def update(self, tenant_id: str, form_id: str, update_data: Dict[str, Any]) -> bool:
         result = await self.collection.update_one(
