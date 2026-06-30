@@ -78,7 +78,6 @@ async def health_check():
 async def root():
     return RedirectResponse(url="/dashboard/")
 
-
 @app.on_event("startup")
 async def backfill_tenant_statuses():
     try:
