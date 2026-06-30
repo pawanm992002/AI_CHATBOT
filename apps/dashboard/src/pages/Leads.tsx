@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { privateAxios } from '../utils/axios';
 import { formatDate } from '../utils/date';
-import { Lead, LeadFormConfig } from '../interfaces';
+import { Lead, LeadFormConfig, LeadFormField } from '../interfaces';
 import { LoadingSpinner } from '@chatbot/shared';
 import {
   Users,
@@ -15,6 +15,8 @@ import {
   ToggleLeft,
   ToggleRight,
   FileText,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 import { LeadFormBuilder } from '../components/LeadFormBuilder';
 import { DeleteConfirmationModal } from '../components/DeleteConfirmationModal';
@@ -29,6 +31,7 @@ const Leads = () => {
   const [deleteTarget, setDeleteTarget] = useState<LeadFormConfig | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [expandedForms, setExpandedForms] = useState<Set<string>>(new Set());
 
   const fetchLeads = async () => {
     try {
@@ -56,6 +59,12 @@ const Leads = () => {
     };
     load();
   }, []);
+
+  useEffect(() => {
+    if (leadForms.length > 0 && expandedForms.size === 0) {
+      setExpandedForms(new Set(leadForms.map((f) => f.form_id)));
+    }
+  }, [leadForms, expandedForms.size]);
 
   const handleToggleEnabled = async (form: LeadFormConfig) => {
     setTogglingId(form.form_id);
@@ -104,6 +113,54 @@ const Leads = () => {
     'bg-rose-950/40 text-rose-400 border border-rose-900/30',
     'bg-blue-950/40 text-blue-400 border border-blue-900/30',
   ];
+
+  const groupLeadsByForm = () => {
+    const groups: { formId: string | null; form: LeadFormConfig | null; leads: Lead[] }[] = [];
+    const formMap = new Map(leadForms.map((f) => [f.form_id, f]));
+    const grouped = new Map<string, Lead[]>();
+
+    for (const lead of leads) {
+      const key = lead.form_id || '__uncategorized__';
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key)!.push(lead);
+    }
+
+    for (const [formId, formLeads] of grouped) {
+      if (formId === '__uncategorized__') {
+        groups.push({ formId: null, form: null, leads: formLeads });
+      } else {
+        groups.push({ formId, form: formMap.get(formId) || null, leads: formLeads });
+      }
+    }
+
+    groups.sort((a, b) => {
+      if (!a.form) return 1;
+      if (!b.form) return -1;
+      return b.leads.length - a.leads.length;
+    });
+
+    return groups;
+  };
+
+  const getLeadFieldValue = (lead: Lead, field: LeadFormField): string => {
+    if (lead.custom_fields && lead.custom_fields[field.field_id]) {
+      return lead.custom_fields[field.field_id];
+    }
+    switch (field.type) {
+      case 'email': return lead.email || '-';
+      case 'phone': return lead.phone || '-';
+      default: return '-';
+    }
+  };
+
+  const toggleFormExpansion = (key: string) => {
+    setExpandedForms((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
   if (loading) {
     return <LoadingSpinner message="Loading leads..." />;
@@ -157,9 +214,9 @@ const Leads = () => {
 
       {/* Tab Content */}
       {activeTab === 'leads' ? (
-        <div className="bg-slate-900 rounded-3xl border border-slate-800/80 shadow-lg overflow-hidden">
+        <div className="space-y-4">
           {leads.length === 0 ? (
-            <div className="px-6 py-16 text-center max-w-sm mx-auto">
+            <div className="bg-slate-900 rounded-3xl border border-slate-800/80 shadow-lg px-6 py-16 text-center max-w-sm mx-auto">
               <Users size={40} className="text-slate-700 mx-auto mb-4 animate-pulse" />
               <h3 className="text-md font-bold text-white">No leads captured</h3>
               <p className="text-xs text-slate-500 mt-2">
@@ -168,64 +225,132 @@ const Leads = () => {
               </p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-800 text-slate-400 text-xxs font-bold uppercase tracking-wider bg-slate-950/60">
-                    <th className="px-6 py-3.5">Contact Name</th>
-                    <th className="px-6 py-3.5">Email Address</th>
-                    <th className="px-6 py-3.5">Phone Number</th>
-                    <th className="px-6 py-3.5">Message Text</th>
-                    <th className="px-6 py-3.5">Submission Date</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800 text-xs text-slate-300">
-                  {leads.map((lead, idx) => {
-                    const colorClass = avatarColors[idx % avatarColors.length];
-                    return (
-                      <tr key={lead.lead_id || idx} className="hover:bg-slate-950/40 transition-colors">
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-3">
-                            <div className={`h-8 w-8 rounded-full flex items-center justify-center font-bold text-xxs ${colorClass}`}>
-                              {getInitials(lead.name)}
-                            </div>
-                            <span className="font-bold text-white">{lead.name}</span>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 font-semibold text-slate-400">
-                          <span className="flex items-center gap-1.5">
-                            <Mail size={14} className="text-slate-500" />
-                            {lead.email}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-slate-400 font-medium">
-                          {lead.phone ? (
-                            <span className="flex items-center gap-1.5">
-                              <Phone size={14} className="text-slate-500" />
-                              {lead.phone}
-                            </span>
-                          ) : (
-                            <span className="text-slate-650">-</span>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 text-slate-400 max-w-xs truncate" title={lead.message}>
-                          <span className="flex items-center gap-1.5">
-                            <MessageSquare size={14} className="text-slate-500 flex-shrink-0" />
-                            <span className="truncate text-wrap">{lead.message || '-'}</span>
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-slate-400">
-                          <span className="flex items-center gap-1.5">
-                            <Calendar size={14} className="text-slate-500" />
-                            {formatDate(lead.created_at)}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            groupLeadsByForm().map(({ formId, form, leads: groupLeads }) => {
+              const isExpanded = expandedForms.has(formId || '__uncategorized__');
+              const sortedFields = form
+                ? [...form.fields].sort((a, b) => a.order - b.order)
+                : [];
+
+              return (
+                <div key={formId || '__uncategorized__'} className="bg-slate-900 rounded-3xl border border-slate-800/80 shadow-lg overflow-hidden">
+                  {/* Accordion Header */}
+                  <button
+                    onClick={() => toggleFormExpansion(formId || '__uncategorized__')}
+                    className="w-full flex items-center justify-between px-6 py-4 hover:bg-slate-800/40 transition-colors cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="text-slate-400">
+                        {isExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+                      </div>
+                      <div className="text-left">
+                        <h3 className="text-sm font-bold text-white">
+                          {form ? form.title : 'Uncategorized'}
+                        </h3>
+                        <p className="text-xxs text-slate-500 mt-0.5">
+                          {groupLeads.length} lead{groupLeads.length !== 1 ? 's' : ''}
+                          {form && ` · ${sortedFields.length} field${sortedFields.length !== 1 ? 's' : ''}`}
+                        </p>
+                      </div>
+                    </div>
+                    {form && (
+                      <span className={`w-2 h-2 rounded-full ${form.enabled ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+                    )}
+                  </button>
+
+                  {/* Accordion Content */}
+                  {isExpanded && (
+                    <div className="overflow-x-auto border-t border-slate-800/80">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="border-b border-slate-800 text-slate-400 text-xxs font-bold uppercase tracking-wider bg-slate-950/60">
+                            {form ? (
+                              sortedFields.map((field) => (
+                                <th key={field.field_id} className="px-6 py-3.5">{field.label}</th>
+                              ))
+                            ) : (
+                              <>
+                                <th className="px-6 py-3.5">Contact Name</th>
+                                <th className="px-6 py-3.5">Email Address</th>
+                                <th className="px-6 py-3.5">Phone Number</th>
+                              </>
+                            )}
+                            <th className="px-6 py-3.5">Message</th>
+                            <th className="px-6 py-3.5">Date</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800 text-xs text-slate-300">
+                          {groupLeads.map((lead, idx) => {
+                            const colorClass = avatarColors[idx % avatarColors.length];
+                            return (
+                              <tr key={lead.lead_id || idx} className="hover:bg-slate-950/40 transition-colors">
+                                {form ? (
+                                  sortedFields.map((field) => (
+                                    <td key={field.field_id} className="px-6 py-4 text-slate-400 font-medium max-w-[200px] truncate" title={getLeadFieldValue(lead, field)}>
+                                      {field.type === 'email' && getLeadFieldValue(lead, field) !== '-' ? (
+                                        <span className="flex items-center gap-1.5">
+                                          <Mail size={14} className="text-slate-500 flex-shrink-0" />
+                                          <span className="truncate">{getLeadFieldValue(lead, field)}</span>
+                                        </span>
+                                      ) : field.type === 'phone' && getLeadFieldValue(lead, field) !== '-' ? (
+                                        <span className="flex items-center gap-1.5">
+                                          <Phone size={14} className="text-slate-500 flex-shrink-0" />
+                                          <span className="truncate">{getLeadFieldValue(lead, field)}</span>
+                                        </span>
+                                      ) : (
+                                        <span className="truncate">{getLeadFieldValue(lead, field)}</span>
+                                      )}
+                                    </td>
+                                  ))
+                                ) : (
+                                  <>
+                                    <td className="px-6 py-4">
+                                      <div className="flex items-center gap-3">
+                                        <div className={`h-8 w-8 rounded-full flex items-center justify-center font-bold text-xxs ${colorClass}`}>
+                                          {getInitials(lead.name)}
+                                        </div>
+                                        <span className="font-bold text-white">{lead.name}</span>
+                                      </div>
+                                    </td>
+                                    <td className="px-6 py-4 font-semibold text-slate-400">
+                                      <span className="flex items-center gap-1.5">
+                                        <Mail size={14} className="text-slate-500" />
+                                        {lead.email}
+                                      </span>
+                                    </td>
+                                    <td className="px-6 py-4 text-slate-400 font-medium">
+                                      {lead.phone ? (
+                                        <span className="flex items-center gap-1.5">
+                                          <Phone size={14} className="text-slate-500" />
+                                          {lead.phone}
+                                        </span>
+                                      ) : (
+                                        <span className="text-slate-650">-</span>
+                                      )}
+                                    </td>
+                                  </>
+                                )}
+                                <td className="px-6 py-4 text-slate-400 max-w-xs truncate" title={lead.message}>
+                                  <span className="flex items-center gap-1.5">
+                                    <MessageSquare size={14} className="text-slate-500 flex-shrink-0" />
+                                    <span className="truncate text-wrap">{lead.message || '-'}</span>
+                                  </span>
+                                </td>
+                                <td className="px-6 py-4 text-slate-400">
+                                  <span className="flex items-center gap-1.5">
+                                    <Calendar size={14} className="text-slate-500" />
+                                    {formatDate(lead.created_at)}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              );
+            })
           )}
         </div>
       ) : (
