@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { privateAxios } from '../utils/axios';
 import { formatDate } from '../utils/date';
 import { Lead, LeadFormConfig, LeadFormField } from '../interfaces';
@@ -15,32 +15,54 @@ import {
   ToggleLeft,
   ToggleRight,
   FileText,
-  ChevronDown,
+  ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
 import { LeadFormBuilder } from '../components/LeadFormBuilder';
 import { DeleteConfirmationModal } from '../components/DeleteConfirmationModal';
 
+const PAGE_SIZE = 20;
+
+const avatarColors = [
+  'bg-violet-950/40 text-violet-400 border border-violet-900/30',
+  'bg-amber-950/40 text-amber-400 border border-amber-900/30',
+  'bg-teal-950/40 text-teal-400 border border-teal-900/30',
+  'bg-rose-950/40 text-rose-400 border border-rose-900/30',
+  'bg-blue-950/40 text-blue-400 border border-blue-900/30',
+];
+
+const getInitials = (name: string) => {
+  return name.split(' ').map((n) => n[0]).join('').substring(0, 2).toUpperCase() || '?';
+};
+
+const getLeadFieldValue = (lead: Lead, field: LeadFormField): string => {
+  if (lead.custom_fields && lead.custom_fields[field.field_id]) {
+    return lead.custom_fields[field.field_id];
+  }
+  switch (field.type) {
+    case 'email': return lead.email || '-';
+    case 'phone': return lead.phone || '-';
+    default: return '-';
+  }
+};
+
 const Leads = () => {
-  const [leads, setLeads] = useState<Lead[]>([]);
   const [leadForms, setLeadForms] = useState<LeadFormConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'leads' | 'builder'>('leads');
+  const [activeFormTab, setActiveFormTab] = useState('__all__');
 
   const [selectedFormId, setSelectedFormId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<LeadFormConfig | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
-  const [expandedForms, setExpandedForms] = useState<Set<string>>(new Set());
 
-  const fetchLeads = async () => {
-    try {
-      const res = await privateAxios.get('/dashboard/leads');
-      setLeads(res.data);
-    } catch (err) {
-      console.error(err);
-    }
-  };
+  // Leads table state
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [loadingLeads, setLoadingLeads] = useState(false);
 
   const fetchLeadForms = async () => {
     try {
@@ -51,20 +73,47 @@ const Leads = () => {
     }
   };
 
+  const fetchLeads = useCallback(async (formTab: string, pageNum: number) => {
+    setLoadingLeads(true);
+    try {
+      const params: Record<string, string | number> = { page: pageNum, page_size: PAGE_SIZE };
+      if (formTab !== '__all__' && formTab !== '__uncategorized__') {
+        params.form_id = formTab;
+      }
+      const res = await privateAxios.get('/dashboard/leads', { params });
+      let items = res.data.items;
+
+      if (formTab === '__uncategorized__') {
+        items = items.filter((l: Lead) => !l.form_id || l.form_id === '');
+      }
+
+      setLeads(items);
+      setTotal(res.data.total);
+      setPage(res.data.page);
+      setTotalPages(res.data.total_pages);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingLeads(false);
+    }
+  }, []);
+
   useEffect(() => {
     const load = async () => {
       setLoading(true);
-      await Promise.all([fetchLeads(), fetchLeadForms()]);
+      await fetchLeadForms();
       setLoading(false);
     };
     load();
   }, []);
 
   useEffect(() => {
-    if (leadForms.length > 0 && expandedForms.size === 0) {
-      setExpandedForms(new Set(leadForms.map((f) => f.form_id)));
-    }
-  }, [leadForms, expandedForms.size]);
+    fetchLeads(activeFormTab, 1);
+  }, [activeFormTab, fetchLeads]);
+
+  const handlePageChange = (newPage: number) => {
+    fetchLeads(activeFormTab, newPage);
+  };
 
   const handleToggleEnabled = async (form: LeadFormConfig) => {
     setTogglingId(form.form_id);
@@ -102,65 +151,8 @@ const Leads = () => {
     }
   };
 
-  const getInitials = (name: string) => {
-    return name.split(' ').map((n) => n[0]).join('').substring(0, 2).toUpperCase() || '?';
-  };
-
-  const avatarColors = [
-    'bg-violet-950/40 text-violet-400 border border-violet-900/30',
-    'bg-amber-950/40 text-amber-400 border border-amber-900/30',
-    'bg-teal-950/40 text-teal-400 border border-teal-900/30',
-    'bg-rose-950/40 text-rose-400 border border-rose-900/30',
-    'bg-blue-950/40 text-blue-400 border border-blue-900/30',
-  ];
-
-  const groupLeadsByForm = () => {
-    const groups: { formId: string | null; form: LeadFormConfig | null; leads: Lead[] }[] = [];
-    const formMap = new Map(leadForms.map((f) => [f.form_id, f]));
-    const grouped = new Map<string, Lead[]>();
-
-    for (const lead of leads) {
-      const key = lead.form_id || '__uncategorized__';
-      if (!grouped.has(key)) grouped.set(key, []);
-      grouped.get(key)!.push(lead);
-    }
-
-    for (const [formId, formLeads] of grouped) {
-      if (formId === '__uncategorized__') {
-        groups.push({ formId: null, form: null, leads: formLeads });
-      } else {
-        groups.push({ formId, form: formMap.get(formId) || null, leads: formLeads });
-      }
-    }
-
-    groups.sort((a, b) => {
-      if (!a.form) return 1;
-      if (!b.form) return -1;
-      return b.leads.length - a.leads.length;
-    });
-
-    return groups;
-  };
-
-  const getLeadFieldValue = (lead: Lead, field: LeadFormField): string => {
-    if (lead.custom_fields && lead.custom_fields[field.field_id]) {
-      return lead.custom_fields[field.field_id];
-    }
-    switch (field.type) {
-      case 'email': return lead.email || '-';
-      case 'phone': return lead.phone || '-';
-      default: return '-';
-    }
-  };
-
-  const toggleFormExpansion = (key: string) => {
-    setExpandedForms((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  };
+  const activeForm = leadForms.find((f) => f.form_id === activeFormTab);
+  const sortedFields = activeForm ? [...activeForm.fields].sort((a, b) => a.order - b.order) : [];
 
   if (loading) {
     return <LoadingSpinner message="Loading leads..." />;
@@ -176,7 +168,7 @@ const Leads = () => {
         </p>
       </div>
 
-      {/* Tabs */}
+      {/* Top-level Tabs */}
       <div className="flex gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800/80 w-fit">
         <button
           onClick={() => setActiveTab('leads')}
@@ -188,11 +180,6 @@ const Leads = () => {
         >
           <Users size={16} />
           View Leads
-          {leads.length > 0 && (
-            <span className="ml-1 text-xxs bg-white/20 px-1.5 py-0.5 rounded-full">
-              {leads.length}
-            </span>
-          )}
         </button>
         <button
           onClick={() => setActiveTab('builder')}
@@ -215,143 +202,203 @@ const Leads = () => {
       {/* Tab Content */}
       {activeTab === 'leads' ? (
         <div className="space-y-4">
-          {leads.length === 0 ? (
-            <div className="bg-slate-900 rounded-3xl border border-slate-800/80 shadow-lg px-6 py-16 text-center max-w-sm mx-auto">
-              <Users size={40} className="text-slate-700 mx-auto mb-4 animate-pulse" />
-              <h3 className="text-md font-bold text-white">No leads captured</h3>
-              <p className="text-xs text-slate-500 mt-2">
-                Leads will appear here immediately after a customer fills out the enquiry form in the widget.
-                Use the Form Builder tab to configure your lead form.
-              </p>
-            </div>
-          ) : (
-            groupLeadsByForm().map(({ formId, form, leads: groupLeads }) => {
-              const isExpanded = expandedForms.has(formId || '__uncategorized__');
-              const sortedFields = form
-                ? [...form.fields].sort((a, b) => a.order - b.order)
-                : [];
+          {/* Form-level Tabs */}
+          <div className="flex gap-1 bg-slate-900/60 p-1 rounded-xl border border-slate-800/50 overflow-x-auto">
+            <button
+              onClick={() => setActiveFormTab('__all__')}
+              className={`flex-shrink-0 px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                activeFormTab === '__all__'
+                  ? 'bg-slate-700 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+              }`}
+            >
+              All
+            </button>
+            {leadForms.map((form) => (
+              <button
+                key={form.form_id}
+                onClick={() => setActiveFormTab(form.form_id)}
+                className={`flex items-center gap-1.5 flex-shrink-0 px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  activeFormTab === form.form_id
+                    ? 'bg-slate-700 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                }`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${form.enabled ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+                {form.title}
+              </button>
+            ))}
+            <button
+              onClick={() => setActiveFormTab('__uncategorized__')}
+              className={`flex-shrink-0 px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                activeFormTab === '__uncategorized__'
+                  ? 'bg-slate-700 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+              }`}
+            >
+              Uncategorized
+            </button>
+          </div>
 
-              return (
-                <div key={formId || '__uncategorized__'} className="bg-slate-900 rounded-3xl border border-slate-800/80 shadow-lg overflow-hidden">
-                  {/* Accordion Header */}
-                  <button
-                    onClick={() => toggleFormExpansion(formId || '__uncategorized__')}
-                    className="w-full flex items-center justify-between px-6 py-4 hover:bg-slate-800/40 transition-colors cursor-pointer"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="text-slate-400">
-                        {isExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
-                      </div>
-                      <div className="text-left">
-                        <h3 className="text-sm font-bold text-white">
-                          {form ? form.title : 'Uncategorized'}
-                        </h3>
-                        <p className="text-xxs text-slate-500 mt-0.5">
-                          {groupLeads.length} lead{groupLeads.length !== 1 ? 's' : ''}
-                          {form && ` · ${sortedFields.length} field${sortedFields.length !== 1 ? 's' : ''}`}
-                        </p>
-                      </div>
-                    </div>
-                    {form && (
-                      <span className={`w-2 h-2 rounded-full ${form.enabled ? 'bg-emerald-400' : 'bg-slate-600'}`} />
-                    )}
-                  </button>
-
-                  {/* Accordion Content */}
-                  {isExpanded && (
-                    <div className="overflow-x-auto border-t border-slate-800/80">
-                      <table className="w-full text-left border-collapse">
-                        <thead>
-                          <tr className="border-b border-slate-800 text-slate-400 text-xxs font-bold uppercase tracking-wider bg-slate-950/60">
-                            {form ? (
-                              sortedFields.map((field) => (
-                                <th key={field.field_id} className="px-6 py-3.5">{field.label}</th>
-                              ))
-                            ) : (
-                              <>
-                                <th className="px-6 py-3.5">Contact Name</th>
-                                <th className="px-6 py-3.5">Email Address</th>
-                                <th className="px-6 py-3.5">Phone Number</th>
-                              </>
-                            )}
-                            <th className="px-6 py-3.5">Message</th>
-                            <th className="px-6 py-3.5">Date</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-800 text-xs text-slate-300">
-                          {groupLeads.map((lead, idx) => {
-                            const colorClass = avatarColors[idx % avatarColors.length];
-                            return (
-                              <tr key={lead.lead_id || idx} className="hover:bg-slate-950/40 transition-colors">
-                                {form ? (
-                                  sortedFields.map((field) => (
-                                    <td key={field.field_id} className="px-6 py-4 text-slate-400 font-medium max-w-[200px] truncate" title={getLeadFieldValue(lead, field)}>
-                                      {field.type === 'email' && getLeadFieldValue(lead, field) !== '-' ? (
-                                        <span className="flex items-center gap-1.5">
-                                          <Mail size={14} className="text-slate-500 flex-shrink-0" />
-                                          <span className="truncate">{getLeadFieldValue(lead, field)}</span>
-                                        </span>
-                                      ) : field.type === 'phone' && getLeadFieldValue(lead, field) !== '-' ? (
-                                        <span className="flex items-center gap-1.5">
-                                          <Phone size={14} className="text-slate-500 flex-shrink-0" />
-                                          <span className="truncate">{getLeadFieldValue(lead, field)}</span>
-                                        </span>
-                                      ) : (
-                                        <span className="truncate">{getLeadFieldValue(lead, field)}</span>
-                                      )}
-                                    </td>
-                                  ))
+          {/* Leads Table */}
+          <div className="bg-slate-900 rounded-3xl border border-slate-800/80 shadow-lg overflow-hidden">
+            {loadingLeads ? (
+              <div className="px-6 py-16 text-center">
+                <div className="w-5 h-5 border-2 border-violet-500 border-t-transparent rounded-full animate-spin mx-auto" />
+                <p className="text-xs text-slate-500 mt-2">Loading leads...</p>
+              </div>
+            ) : leads.length === 0 ? (
+              <div className="px-6 py-16 text-center max-w-sm mx-auto">
+                <Users size={40} className="text-slate-700 mx-auto mb-4 animate-pulse" />
+                <h3 className="text-md font-bold text-white">No leads found</h3>
+                <p className="text-xs text-slate-500 mt-2">
+                  {activeFormTab === '__all__'
+                    ? 'Leads will appear here after visitors fill out the enquiry form in the widget.'
+                    : activeFormTab === '__uncategorized__'
+                    ? 'No leads without an associated form.'
+                    : 'No leads submitted through this form yet.'}
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-800 text-slate-400 text-xxs font-bold uppercase tracking-wider bg-slate-950/60">
+                        {activeFormTab !== '__all__' && activeFormTab !== '__uncategorized__' && sortedFields.length > 0 ? (
+                          sortedFields.map((field) => (
+                            <th key={field.field_id} className="px-6 py-3.5">{field.label}</th>
+                          ))
+                        ) : (
+                          <>
+                            <th className="px-6 py-3.5">Contact Name</th>
+                            <th className="px-6 py-3.5">Email Address</th>
+                            <th className="px-6 py-3.5">Phone Number</th>
+                          </>
+                        )}
+                        <th className="px-6 py-3.5">Message</th>
+                        <th className="px-6 py-3.5">Date</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800 text-xs text-slate-300">
+                      {leads.map((lead, idx) => (
+                        <tr key={lead.lead_id || idx} className="hover:bg-slate-950/40 transition-colors">
+                          {activeFormTab !== '__all__' && activeFormTab !== '__uncategorized__' && sortedFields.length > 0 ? (
+                            sortedFields.map((field) => (
+                              <td key={field.field_id} className="px-6 py-4 text-slate-400 font-medium max-w-[200px] truncate" title={getLeadFieldValue(lead, field)}>
+                                {field.type === 'email' && getLeadFieldValue(lead, field) !== '-' ? (
+                                  <span className="flex items-center gap-1.5">
+                                    <Mail size={14} className="text-slate-500 flex-shrink-0" />
+                                    <span className="truncate">{getLeadFieldValue(lead, field)}</span>
+                                  </span>
+                                ) : field.type === 'phone' && getLeadFieldValue(lead, field) !== '-' ? (
+                                  <span className="flex items-center gap-1.5">
+                                    <Phone size={14} className="text-slate-500 flex-shrink-0" />
+                                    <span className="truncate">{getLeadFieldValue(lead, field)}</span>
+                                  </span>
                                 ) : (
-                                  <>
-                                    <td className="px-6 py-4">
-                                      <div className="flex items-center gap-3">
-                                        <div className={`h-8 w-8 rounded-full flex items-center justify-center font-bold text-xxs ${colorClass}`}>
-                                          {getInitials(lead.name)}
-                                        </div>
-                                        <span className="font-bold text-white">{lead.name}</span>
-                                      </div>
-                                    </td>
-                                    <td className="px-6 py-4 font-semibold text-slate-400">
-                                      <span className="flex items-center gap-1.5">
-                                        <Mail size={14} className="text-slate-500" />
-                                        {lead.email}
-                                      </span>
-                                    </td>
-                                    <td className="px-6 py-4 text-slate-400 font-medium">
-                                      {lead.phone ? (
-                                        <span className="flex items-center gap-1.5">
-                                          <Phone size={14} className="text-slate-500" />
-                                          {lead.phone}
-                                        </span>
-                                      ) : (
-                                        <span className="text-slate-650">-</span>
-                                      )}
-                                    </td>
-                                  </>
+                                  <span className="truncate">{getLeadFieldValue(lead, field)}</span>
                                 )}
-                                <td className="px-6 py-4 text-slate-400 max-w-xs truncate" title={lead.message}>
+                              </td>
+                            ))
+                          ) : (
+                            <>
+                              <td className="px-6 py-4">
+                                <div className="flex items-center gap-3">
+                                  <div className={`h-8 w-8 rounded-full flex items-center justify-center font-bold text-xxs ${avatarColors[idx % avatarColors.length]}`}>
+                                    {getInitials(lead.name)}
+                                  </div>
+                                  <span className="font-bold text-white">{lead.name}</span>
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 font-semibold text-slate-400">
+                                <span className="flex items-center gap-1.5">
+                                  <Mail size={14} className="text-slate-500" />
+                                  {lead.email}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 text-slate-400 font-medium">
+                                {lead.phone ? (
                                   <span className="flex items-center gap-1.5">
-                                    <MessageSquare size={14} className="text-slate-500 flex-shrink-0" />
-                                    <span className="truncate text-wrap">{lead.message || '-'}</span>
+                                    <Phone size={14} className="text-slate-500" />
+                                    {lead.phone}
                                   </span>
-                                </td>
-                                <td className="px-6 py-4 text-slate-400">
-                                  <span className="flex items-center gap-1.5">
-                                    <Calendar size={14} className="text-slate-500" />
-                                    {formatDate(lead.created_at)}
-                                  </span>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
+                                ) : (
+                                  <span className="text-slate-650">-</span>
+                                )}
+                              </td>
+                            </>
+                          )}
+                          <td className="px-6 py-4 text-slate-400 max-w-xs truncate" title={lead.message}>
+                            <span className="flex items-center gap-1.5">
+                              <MessageSquare size={14} className="text-slate-500 flex-shrink-0" />
+                              <span className="truncate text-wrap">{lead.message || '-'}</span>
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-slate-400">
+                            <span className="flex items-center gap-1.5">
+                              <Calendar size={14} className="text-slate-500" />
+                              {formatDate(lead.created_at)}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              );
-            })
-          )}
+
+                {/* Pagination */}
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-between px-6 py-3 border-t border-slate-800/80">
+                    <p className="text-xxs text-slate-500">
+                      Page {page} of {totalPages} · {total} total
+                    </p>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handlePageChange(page - 1)}
+                        disabled={page <= 1}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/60 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                      >
+                        <ChevronLeft size={16} />
+                      </button>
+                      {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+                        let pageNum: number;
+                        if (totalPages <= 5) {
+                          pageNum = i + 1;
+                        } else if (page <= 3) {
+                          pageNum = i + 1;
+                        } else if (page >= totalPages - 2) {
+                          pageNum = totalPages - 4 + i;
+                        } else {
+                          pageNum = page - 2 + i;
+                        }
+                        return (
+                          <button
+                            key={pageNum}
+                            onClick={() => handlePageChange(pageNum)}
+                            className={`w-7 h-7 rounded-lg text-xxs font-semibold transition-colors cursor-pointer ${
+                              pageNum === page
+                                ? 'bg-violet-600 text-white'
+                                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                            }`}
+                          >
+                            {pageNum}
+                          </button>
+                        );
+                      })}
+                      <button
+                        onClick={() => handlePageChange(page + 1)}
+                        disabled={page >= totalPages}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/60 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                      >
+                        <ChevronRight size={16} />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </div>
       ) : (
         <div className="flex gap-6 min-h-[600px]">

@@ -263,7 +263,26 @@ async def submit_lead(req: LeadSubmitRequest, request: Request, current_tenant: 
 
 
 @router.get("/dashboard/leads")
-async def list_leads(current_tenant: dict = Depends(get_current_tenant)):
+async def list_leads(
+    page: int = 1,
+    page_size: int = 20,
+    form_id: str | None = None,
+    current_tenant: dict = Depends(get_current_tenant),
+):
     tenant_id = current_tenant["tenant_id"]
-    leads = await lead_repo.get_by_tenant(tenant_id)
-    return leads
+    skip = (page - 1) * page_size
+
+    if form_id:
+        leads = await lead_repo.get_by_tenant_and_form(tenant_id, form_id, skip=skip, limit=page_size)
+        total = await lead_repo.count_by_tenant_and_form(tenant_id, form_id)
+    else:
+        leads = await lead_repo.get_by_tenant(tenant_id, skip=skip, limit=page_size)
+        total = await lead_repo.count_by_tenant(tenant_id)
+
+    return {
+        "items": leads,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": max(1, -(-total // page_size)),
+    }
