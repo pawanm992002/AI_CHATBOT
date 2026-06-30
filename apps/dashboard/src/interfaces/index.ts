@@ -126,3 +126,95 @@ export interface PaginatedResponse<T> {
   page_size: number;
   total_pages: number;
 }
+
+export interface ModelUsage {
+  provider: string;
+  model: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  call_count: number;
+  avg_latency_ms: number;
+  success_count: number;
+  error_count: number;
+  cost: number;
+}
+
+export interface PlatformOverview {
+  total_tenants: number;
+  active_tenants: number;
+  total_conversations: number;
+  total_messages: number;
+  total_tokens: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  estimated_cost: number;
+  model_usage: ModelUsage[];
+  avg_latency_ms: number;
+  success_count: number;
+  error_count: number;
+  error_rate: number;
+  total_leads: number;
+  lead_conversion: number;
+  like_count: number;
+  dislike_count: number;
+  like_ratio: number;
+}
+
+export interface TimeSeriesPoint {
+  date: string;
+  messages: number;
+  conversations: number;
+  tokens: number;
+  cost: number;
+  leads: number;
+}
+
+export interface TenantUsage {
+  tenant_id: string;
+  domain: string;
+  business_name: string;
+  plan: string;
+  created_at: string;
+  conversations: number;
+  visitors: number;
+  messages: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  estimated_cost: number;
+  model_usage: ModelUsage[];
+  leads: number;
+  likes: number;
+  dislikes: number;
+  like_ratio: number;
+  last_activity: string | null;
+}
+
+export interface TenantAnalyticsDetail {
+  tenant: {
+    tenant_id: string;
+    domain: string;
+    plan: string;
+    business_name: string;
+    created_at: string;
+  };
+  kpi: {
+    conversations: number;
+    visitors: number;
+    messages: number;
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+    estimated_cost: number;
+    model_usage: ModelUsage[];
+    avg_latency_ms: number;
+    leads: number;
+    lead_conversion: number;
+    likes: number;
+    dislikes: number;
+    like_ratio: number;
+    last_activity: string | null;
+  };
+  timeseries: TimeSeriesPoint[];
+}

@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import FileResponse, RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
-from controllers import tenants, crawl, chat, sources, faqs, text_docs, leads, admin, knowledge_improvement, providers
+from controllers import tenants, crawl, chat, sources, faqs, text_docs, leads, admin, knowledge_improvement, providers, admin_analytics
 from core.auth import db
 from fastapi.staticfiles import StaticFiles
 import os
@@ -44,6 +44,7 @@ app.include_router(faqs.router, prefix="/api")
 app.include_router(text_docs.router, prefix="/api")
 app.include_router(leads.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
+app.include_router(admin_analytics.router, prefix="/api")
 app.include_router(knowledge_improvement.router, prefix="/api")
 app.include_router(providers.router, prefix="/api")
 
@@ -143,6 +144,8 @@ async def ensure_lookup_indexes():
         await db.tenants.create_index("api_key", unique=True)
         await db.tenants.create_index("domain")
         await db.conversations.create_index("session_id")
+        await db.conversations.create_index([("tenant_id", 1), ("created_at", -1)])
+        await db.conversations.create_index([("tenant_id", 1), ("updated_at", -1)])
         await db.crawl_jobs.create_index([("job_id", 1), ("tenant_id", 1)])
         await db.sources.create_index([("tenant_id", 1), ("source_id", 1)])
         await db.faqs.create_index([("tenant_id", 1), ("source_id", 1), ("faq_id", 1)])

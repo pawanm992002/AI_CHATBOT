@@ -870,6 +870,91 @@ System admin panel for managing tenants across the platform.
 
 Routes: `/admin/login`, `/admin/tenants` (protected by `AdminRoute` guard)
 
+## Admin Analytics Dashboard
+
+Platform-wide analytics and per-tenant drill-down for monitoring usage, costs, and performance.
+
+### Features
+
+- **Platform Overview**: Total tenants, conversations, messages, feedback stats, token usage, estimated costs, latency, error rates
+- **Per-Tenant Usage**: Token breakdown, cost estimates, feedback analysis for each tenant
+- **Model Leaderboard**: Usage and cost breakdown by LLM provider and model
+- **Time-Series Charts**: Conversations, messages, tokens, and costs over configurable periods (7d, 30d, 90d, 1y, custom)
+- **Top Tenants**: Ranked list by message count with actual cost calculation
+- **Tenant Selector**: Quick search and navigation to per-tenant drill-down
+- **Per-Tenant Analytics**: Detailed view with feedback breakdown, model usage, and time-series
+
+### Dashboard Routes
+
+| Route | Description |
+|---|---|
+| `/admin/analytics` | Platform-wide analytics dashboard |
+| `/admin/analytics/:tenantId` | Per-tenant analytics drill-down |
+
+### Backend Endpoints
+
+| Endpoint | Description |
+|---|---|
+| `GET /admin/analytics/overview` | Platform-wide KPIs (cached 30s) |
+| `GET /admin/analytics/timeseries` | Time-series data for charts (cached 30s) |
+| `GET /admin/analytics/tenants` | Per-tenant usage breakdown |
+| `GET /admin/analytics/tenant/{tenantId}` | Detailed tenant analytics |
+| `GET /admin/analytics/top-tenants` | Top tenants by usage with costs |
+| `GET /admin/analytics/models` | Model usage leaderboard |
+
+### Usage Schema
+
+Each assistant message stores usage metadata for analytics:
+
+```json
+{
+  "usage": {
+    "prompt_tokens": 150,
+    "completion_tokens": 50,
+    "total_tokens": 200,
+    "reasoning_tokens": 0,
+    "cached_tokens": 0,
+    "provider": "openai",
+    "model": "gpt-4o",
+    "latency_ms": 1250,
+    "status": "success",
+    "error": null
+  }
+}
+```
+
+### Cost Calculation
+
+- Costs computed during analytics from centralized pricing table (`backend/services/llm/pricing.py`)
+- Actual provider/model used for accurate cost estimation (not hardcoded defaults)
+- Supports OpenAI, Groq, and OpenRouter pricing
+
+### Performance
+
+- MongoDB aggregation pipelines for server-side computation (no N+1 queries)
+- Redis caching (30s TTL) for overview and timeseries endpoints
+- Compound indexes on `(tenant_id, created_at)` and `(tenant_id, updated_at)` for fast queries
+- `asyncio.gather()` for concurrent independent aggregations
+
+### Frontend Components
+
+| Component | Purpose |
+|---|---|
+| `KPICard` | Displays individual KPI metrics with formatting |
+| `TimeSeriesChart` | Recharts line/area charts for time-series data |
+| `ModelUsageTable` | Per-model token/cost/latency breakdown table |
+| `TenantSelector` | Reusable tenant search dropdown for quick navigation |
+| `DataTable` | Generic sortable/paginated table component |
+| `FeedbackBreakdown` | Like/dislike visualization |
+| `DateRangeFilter` | Period selector with custom date range support |
+
+### Tech Stack Additions
+
+| Component | Technology |
+|---|---|
+| Charts | Recharts (React charting library) |
+| Code Splitting | Manual chunks for recharts, React.lazy() for routes |
+
 ## RBAC (Role-Based Access Control)
 
 Dashboard implements a 3-tier role system:
@@ -924,7 +1009,7 @@ The embeddable chat widget (`apps/widget/`) is built as a self-executing IIFE bu
 | Suggested Questions | OpenAI `gpt-4o-mini` |
 | Crawling | Firecrawl API |
 | Auth | JWT in HttpOnly cookies + API keys (bcrypt + SHA-256) |
-| Frontend (Dashboard) | React 18, Vite, TailwindCSS 4, react-router-dom, lucide-react |
+| Frontend (Dashboard) | React 18, Vite, TailwindCSS 4, react-router-dom, lucide-react, recharts |
 | Frontend (Widget) | React 18, Vite (IIFE bundle), react-markdown, TailwindCSS 4 |
 | Shared Types | `@chatbot/shared` workspace package |
 | Chunking | LangChain (MarkdownHeaderTextSplitter + RecursiveCharacterTextSplitter) |
@@ -1045,6 +1130,16 @@ The embeddable chat widget (`apps/widget/`) is built as a self-executing IIFE bu
 | GET | `/api/admin/tenants` | JWT (admin) | List all tenants |
 | DELETE | `/api/admin/tenants/{tenant_id}` | JWT (admin) | Delete tenant + all associated data |
 
+### Admin Analytics
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| GET | `/api/admin/analytics/overview` | JWT (admin) | Platform-wide KPIs (cached 30s) |
+| GET | `/api/admin/analytics/timeseries` | JWT (admin) | Time-series data for charts (cached 30s) |
+| GET | `/api/admin/analytics/tenants` | JWT (admin) | Per-tenant usage breakdown |
+| GET | `/api/admin/analytics/tenant/{tenantId}` | JWT (admin) | Detailed tenant analytics |
+| GET | `/api/admin/analytics/top-tenants` | JWT (admin) | Top tenants by usage with costs |
+| GET | `/api/admin/analytics/models` | JWT (admin) | Model usage leaderboard |
+
 ## Database Collections
 
 | Collection | Purpose |
@@ -1056,7 +1151,7 @@ The embeddable chat widget (`apps/widget/`) is built as a self-executing IIFE bu
 | `sources` | Knowledge source metadata |
 | `crawl_jobs` | Crawl job status and history |
 | `source_jobs` | Indexing job tracking (crawl, pdf_index, faq_index, text_index) |
-| `conversations` | Chat conversation history |
+| `conversations` | Chat conversation history (includes usage metadata for analytics) |
 | `visitors` | Visitor tracking (IP, page views, messages) |
 | `faqs` | FAQ Q&A pairs |
 | `documents` | Text document content |

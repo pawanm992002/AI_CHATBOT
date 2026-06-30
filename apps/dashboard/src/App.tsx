@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link, useNavigate } from 'react-router-dom';
 import { StoreProvider } from './store';
 import Layout from './components/Layout';
@@ -20,8 +20,12 @@ import AIProvider from './pages/AIProvider';
 import AdminLogin from './pages/AdminLogin';
 import AdminTenants from './pages/AdminTenants';
 
+// Lazy-loaded pages (code-split)
+const AdminAnalytics = lazy(() => import('./pages/AdminAnalytics'));
+const TenantAnalytics = lazy(() => import('./pages/TenantAnalytics'));
+
 // System Admin Layout Component
-import { Shield, Users, LogOut, Sun, Moon } from 'lucide-react';
+import { Shield, Users, BarChart3, LogOut, Sun, Moon } from 'lucide-react';
 
 const AuthSpinner = () => (
   <div className="flex h-screen items-center justify-center bg-slate-950">
@@ -136,6 +140,13 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
               </span>
             )}
           </Link>
+          <Link
+            to="/admin/analytics"
+            className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all text-slate-400 hover:bg-slate-800/40 hover:text-slate-200"
+          >
+            <BarChart3 size={18} />
+            <span>Analytics</span>
+          </Link>
         </nav>
 
         <div className="border-t border-slate-800 pt-5">
@@ -205,6 +216,7 @@ const App = () => {
   return (
     <StoreProvider>
       <BrowserRouter basename="/dashboard">
+        <Suspense fallback={<AuthSpinner />}>
         <Routes>
           <Route path="/login" element={<GuestRoute><Login /></GuestRoute>} />
           <Route path="/" element={<PrivateRoute><Overview /></PrivateRoute>} />
@@ -220,8 +232,11 @@ const App = () => {
           <Route path="/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
           <Route path="/admin/login" element={<AdminGuestRoute><AdminLogin /></AdminGuestRoute>} />
           <Route path="/admin/tenants" element={<AdminRoute><AdminTenants /></AdminRoute>} />
+          <Route path="/admin/analytics" element={<AdminRoute><AdminAnalytics /></AdminRoute>} />
+          <Route path="/admin/analytics/:tenantId" element={<AdminRoute><TenantAnalytics /></AdminRoute>} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
+        </Suspense>
       </BrowserRouter>
     </StoreProvider>
   );

@@ -1,12 +1,16 @@
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from enum import StrEnum
+from typing import Any
 import json
 import re
+import time
 
 from core.auth import db
 from core.redis import redis_client, get_redis_key
 from services.embedder import embed_text
-from services.llm.factory import get_llm, get_llm_raw, _to_lc_messages
+from services.llm.factory import get_llm, get_llm_raw, _to_lc_messages, extract_usage
+from services.llm.pricing import calculate_cost
 from services.vector_search import search_chunks
 from repositories.knowledge_gap_repository import _vector_search_gaps
 from views.responses import ChatSource
@@ -141,8 +145,8 @@ class ChatService:
             system_prompt = prompts.NO_MATCH_OUT_OF_SCOPE_PROMPT.format(business_name=business_name)
             forms = await _form_config_repo.get_all_enabled_for_tenant(tenant_id)
             tool_schema = self._build_form_tool(forms) if forms else None
-            answer, show_form, form_id = await self._complete_answer(system_prompt, messages, provider, model, tools=[tool_schema] if tool_schema else None, forms=forms)
-            messages.append({"role": "assistant", "content": answer})
+            answer, show_form, form_id, usage = await self._complete_answer(system_prompt, messages, provider, model, tools=[tool_schema] if tool_schema else None, forms=forms)
+            messages.append({"role": "assistant", "content": answer, "usage": usage})
             summary, messages = await self._compact_if_needed(summary, messages, provider, model)
             await self._persist_conversation(turn, summary, messages)
             await self._track_visitor_message(turn.session_id)
@@ -204,8 +208,8 @@ class ChatService:
             system_prompt = prompts.NO_MATCH_OUT_OF_SCOPE_PROMPT.format(business_name=business_name)
             forms = await _form_config_repo.get_all_enabled_for_tenant(tenant_id)
             tool_schema = self._build_form_tool(forms) if forms else None
-            answer, show_form, form_id = await self._complete_answer(system_prompt, messages, provider, model, tools=[tool_schema] if tool_schema else None, forms=forms)
-            messages.append({"role": "assistant", "content": answer})
+            answer, show_form, form_id, usage = await self._complete_answer(system_prompt, messages, provider, model, tools=[tool_schema] if tool_schema else None, forms=forms)
+            messages.append({"role": "assistant", "content": answer, "usage": usage})
             summary, messages = await self._compact_if_needed(summary, messages, provider, model)
             await self._persist_conversation(turn, summary, messages)
             await self._track_visitor_message(turn.session_id)
@@ -257,16 +261,18 @@ class ChatService:
         full_answer = ""
         show_form = False
         form_id = ""
+        usage: dict[str, Any] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "reasoning_tokens": 0, "cached_tokens": 0, "provider": tenant_ai_provider, "model": tenant_ai_model, "latency_ms": 0.0, "status": "success"}
         async for item in self._complete_answer_stream(system_prompt, messages, tenant_ai_provider, tenant_ai_model, tools=[tool_schema] if tool_schema else None, forms=forms):
             if isinstance(item, dict):
                 full_answer = item["answer"]
                 show_form = item["show_form"]
                 form_id = item["form_id"]
+                usage = item.get("usage", usage)
             else:
                 full_answer += item
                 await on_token(item)
 
-        messages.append({"role": "assistant", "content": full_answer})
+        messages.append({"role": "assistant", "content": full_answer, "usage": usage})
         summary, messages = await self._compact_if_needed(summary, messages, tenant_ai_provider, tenant_ai_model)
         await self._persist_conversation(turn, summary, messages)
         await self._track_visitor_message(turn.session_id)
@@ -305,16 +311,18 @@ class ChatService:
         full_answer = ""
         show_form = False
         form_id = ""
+        usage: dict[str, Any] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "reasoning_tokens": 0, "cached_tokens": 0, "provider": tenant_ai_provider, "model": tenant_ai_model, "latency_ms": 0.0, "status": "success"}
         async for item in self._complete_answer_stream(system_prompt, messages, tenant_ai_provider, tenant_ai_model, tools=[tool_schema] if tool_schema else None, forms=forms):
             if isinstance(item, dict):
                 full_answer = item["answer"]
                 show_form = item["show_form"]
                 form_id = item["form_id"]
+                usage = item.get("usage", usage)
             else:
                 full_answer += item
                 await on_token(item)
 
-        messages.append({"role": "assistant", "content": full_answer})
+        messages.append({"role": "assistant", "content": full_answer, "usage": usage})
         summary, messages = await self._compact_if_needed(summary, messages, tenant_ai_provider, tenant_ai_model)
         await self._persist_conversation(turn, summary, messages)
         await self._track_visitor_message(turn.session_id)
@@ -342,8 +350,8 @@ class ChatService:
         forms = await _form_config_repo.get_all_enabled_for_tenant(tenant_id)
         tool_schema = self._build_form_tool(forms) if forms else None
 
-        answer, show_form, form_id = await self._complete_answer(system_prompt, messages, tenant_ai_provider, tenant_ai_model, tools=[tool_schema] if tool_schema else None, forms=forms)
-        messages.append({"role": "assistant", "content": answer})
+        answer, show_form, form_id, usage = await self._complete_answer(system_prompt, messages, tenant_ai_provider, tenant_ai_model, tools=[tool_schema] if tool_schema else None, forms=forms)
+        messages.append({"role": "assistant", "content": answer, "usage": usage})
 
         summary, messages = await self._compact_if_needed(summary, messages, tenant_ai_provider, tenant_ai_model)
         await self._persist_conversation(turn, summary, messages)
@@ -386,8 +394,8 @@ class ChatService:
         forms = await _form_config_repo.get_all_enabled_for_tenant(turn.tenant["tenant_id"])
         tool_schema = self._build_form_tool(forms) if forms else None
 
-        answer, show_form, form_id = await self._complete_answer(system_prompt, messages, tenant_ai_provider, tenant_ai_model, tools=[tool_schema] if tool_schema else None, forms=forms)
-        messages.append({"role": "assistant", "content": answer})
+        answer, show_form, form_id, usage = await self._complete_answer(system_prompt, messages, tenant_ai_provider, tenant_ai_model, tools=[tool_schema] if tool_schema else None, forms=forms)
+        messages.append({"role": "assistant", "content": answer, "usage": usage})
 
         summary, messages = await self._compact_if_needed(summary, messages, tenant_ai_provider, tenant_ai_model)
         await self._persist_conversation(turn, summary, messages)
@@ -471,8 +479,11 @@ class ChatService:
             prompt += f"\n\nHere is a summary of the conversation so far:\n{summary}"
         return prompt
 
-    async def _complete_answer(self, system_prompt: str, messages: list[dict], provider: str = "openai", model: str = "gpt-4o", tools: list[dict] | None = None, forms: list[dict] | None = None) -> tuple[str, bool, str]:
-        """Non-streaming LLM call with optional tool calling for form routing."""
+    async def _complete_answer(self, system_prompt: str, messages: list[dict], provider: str = "openai", model: str = "gpt-4o", tools: list[dict] | None = None, forms: list[dict] | None = None) -> tuple[str, bool, str, dict[str, Any]]:
+        """Non-streaming LLM call with optional tool calling for form routing.
+
+        Returns (answer, show_form, form_id, usage_dict).
+        """
         if tools:
             system_prompt += (
                 "\n\nWhen the user expresses intent to take a specific action "
@@ -483,11 +494,26 @@ class ChatService:
         raw_llm = get_llm_raw(provider, model)
         lc_messages = _to_lc_messages(api_messages)
 
-        if tools:
-            llm_with_tools = raw_llm.bind_tools(tools, tool_choice="auto")
-            response = await llm_with_tools.ainvoke(lc_messages)
-        else:
-            response = await raw_llm.ainvoke(lc_messages)
+        start = time.perf_counter()
+        try:
+            if tools:
+                llm_with_tools = raw_llm.bind_tools(tools, tool_choice="auto")
+                response = await llm_with_tools.ainvoke(lc_messages)
+            else:
+                response = await raw_llm.ainvoke(lc_messages)
+            latency_ms = (time.perf_counter() - start) * 1000
+        except Exception as e:
+            latency_ms = (time.perf_counter() - start) * 1000
+            usage = {
+                "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
+                "reasoning_tokens": 0, "cached_tokens": 0,
+                "provider": provider, "model": model,
+                "latency_ms": round(latency_ms, 1),
+                "status": "error", "error": str(e)[:200],
+            }
+            return "", False, "", usage
+
+        usage = extract_usage(response, provider, model, latency_ms)
 
         answer = response.content or ""
         show_form = False
@@ -504,7 +530,7 @@ class ChatService:
         if show_form and not answer:
             answer = "Let me get that for you!"
 
-        return answer, show_form, form_id
+        return answer, show_form, form_id, usage
 
     async def _complete_answer_stream(self, system_prompt: str, messages: list[dict], provider: str = "openai", model: str = "gpt-4o", tools: list[dict] | None = None, forms: list[dict] | None = None):
         """Stream answer tokens with optional tool calling. Yields token strings, then a final dict."""
@@ -526,17 +552,52 @@ class ChatService:
         full_answer = ""
         tool_call_args_by_index: dict[int, str] = {}
         tool_call_names: dict[int, str] = {}
+        usage: dict[str, Any] = {
+            "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
+            "reasoning_tokens": 0, "cached_tokens": 0,
+            "provider": provider, "model": model,
+            "latency_ms": 0.0, "status": "success",
+        }
 
-        async for chunk in llm_with_tools.astream(lc_messages):
-            if chunk.content and isinstance(chunk.content, str):
-                full_answer += chunk.content
-                yield chunk.content
-            for tc_chunk in (chunk.tool_call_chunks or []):
-                idx = tc_chunk.get("index", 0)
-                if tc_chunk.get("name"):
-                    tool_call_names[idx] = tc_chunk["name"]
-                if tc_chunk.get("args"):
-                    tool_call_args_by_index[idx] = tool_call_args_by_index.get(idx, "") + tc_chunk["args"]
+        start = time.perf_counter()
+        try:
+            async for chunk in llm_with_tools.astream(lc_messages):
+                if isinstance(chunk, dict) and "usage" in chunk:
+                    # Final usage dict from _LLMWrapper.astream
+                    stream_usage = chunk["usage"]
+                    usage["prompt_tokens"] = stream_usage.get("prompt_tokens", 0) or 0
+                    usage["completion_tokens"] = stream_usage.get("completion_tokens", 0) or 0
+                    usage["total_tokens"] = stream_usage.get("total_tokens", 0) or 0
+                    usage["latency_ms"] = stream_usage.get("latency_ms", 0.0)
+                    usage["status"] = stream_usage.get("status", "success")
+                    if stream_usage.get("error"):
+                        usage["error"] = stream_usage["error"]
+                    continue
+                if chunk.content and isinstance(chunk.content, str):
+                    full_answer += chunk.content
+                    yield chunk.content
+                for tc_chunk in (chunk.tool_call_chunks or []):
+                    idx = tc_chunk.get("index", 0)
+                    if tc_chunk.get("name"):
+                        tool_call_names[idx] = tc_chunk["name"]
+                    if tc_chunk.get("args"):
+                        tool_call_args_by_index[idx] = tool_call_args_by_index.get(idx, "") + tc_chunk["args"]
+                # Capture usage from streaming chunks
+                usage_meta = getattr(chunk, "usage_metadata", None)
+                if usage_meta:
+                    usage["prompt_tokens"] = getattr(usage_meta, "input_tokens", 0) or 0
+                    usage["completion_tokens"] = getattr(usage_meta, "output_tokens", 0) or 0
+                    usage["total_tokens"] = getattr(usage_meta, "total_tokens", 0) or 0
+        except Exception as e:
+            latency_ms = (time.perf_counter() - start) * 1000
+            usage["latency_ms"] = round(latency_ms, 1)
+            usage["status"] = "error"
+            usage["error"] = str(e)[:200]
+            yield {"answer": full_answer, "show_form": False, "form_id": "", "usage": usage}
+            return
+
+        if usage["latency_ms"] == 0.0:
+            usage["latency_ms"] = round((time.perf_counter() - start) * 1000, 1)
 
         show_form = False
         form_id = ""
@@ -555,7 +616,7 @@ class ChatService:
             full_answer = fallback
             yield fallback
 
-        yield {"answer": full_answer, "show_form": show_form, "form_id": form_id}
+        yield {"answer": full_answer, "show_form": show_form, "form_id": form_id, "usage": usage}
 
     async def _load_conversation_context(self, session_id: str) -> tuple[str, list[dict]]:
         cache_key = get_redis_key(f"chat_session:{session_id}")
@@ -581,6 +642,7 @@ class ChatService:
 
     async def _persist_conversation(self, turn: ChatTurnInput, summary: str, messages: list[dict]) -> None:
         cache_key = get_redis_key(f"chat_session:{turn.session_id}")
+        now = datetime.now(timezone.utc)
         await db.conversations.update_one(
             {"session_id": turn.session_id},
             {"$set": {
@@ -588,6 +650,9 @@ class ChatService:
                 "current_url": turn.current_url,
                 "summary": summary,
                 "messages": messages,
+                "updated_at": now,
+            }, "$setOnInsert": {
+                "created_at": now,
             }},
             upsert=True,
         )

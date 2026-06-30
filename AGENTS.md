@@ -105,13 +105,19 @@ Open `backend/templates/test_page.html` in a browser to test the embedded widget
 | `backend/services/vector_search.py` | Hybrid vector + BM25 search |
 | `backend/services/ingestion.py` | Document chunking/embedding pipeline |
 | `backend/services/embedder.py` | OpenAI embeddings via LangChain `OpenAIEmbeddings` |
-| `backend/services/llm/factory.py` | Provider-agnostic LLM factory (OpenAI, Groq, OpenRouter) — `get_llm()`, `get_llm_raw()`, `_to_lc_messages()` |
+| `backend/services/llm/factory.py` | Provider-agnostic LLM factory (OpenAI, Groq, OpenRouter) — `get_llm()`, `get_llm_raw()`, `_to_lc_messages()`, `extract_usage()` |
+| `backend/services/llm/pricing.py` | Centralized LLM pricing table and `calculate_cost()` for cost estimation |
+| `backend/services/admin_analytics_service.py` | MongoDB aggregation pipelines for platform-wide analytics (overview, timeseries, per-tenant, model leaderboard) |
 | `backend/core/rate_limiter.py` | Redis-based sliding window rate limiter (per-IP, per-tenant, per-session) |
 | `apps/widget/src/components/ErrorBoundary.tsx` | React error boundary preventing widget crashes from killing WebSocket |
 | `backend/core/schema_validator.py` | MongoDB JSON schema validators (15 collections) |
 | `apps/widget/src/Widget.tsx` | Main widget component (WebSocket streaming) |
 | `apps/widget/src/index.tsx` | Widget bootstrapper (reads `data-api-key` from script tag) |
 | `apps/dashboard/src/App.tsx` | Dashboard router with private/admin routes |
+| `apps/dashboard/src/pages/AdminAnalytics.tsx` | Platform-wide analytics page (KPIs, charts, model leaderboard, tenant search) |
+| `apps/dashboard/src/pages/TenantAnalytics.tsx` | Per-tenant analytics drill-down page |
+| `apps/dashboard/src/components/analytics/TenantSelector.tsx` | Reusable tenant search dropdown component |
+| `apps/dashboard/src/components/analytics/ModelUsageTable.tsx` | Per-model token/cost/latency breakdown table |
 | `packages/shared/src/types.ts` | Shared TypeScript interfaces |
 
 ## Database Collections
