@@ -69,10 +69,14 @@ async def dashboard_spa(full_path: str):
     return FileResponse(os.path.join(dashboard_dist, "index.html"))
 
 
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
+
+
 @app.get("/")
 async def root():
     return RedirectResponse(url="/dashboard/")
-
 
 @app.on_event("startup")
 async def backfill_tenant_statuses():
