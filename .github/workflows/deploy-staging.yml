@@ -71,7 +71,7 @@ jobs:
 
             git fetch origin staging
             git reset --hard origin/staging
-            git clean -fdx -e .env -e node_modules
+            git clean -fdx -e .env -e .env.staging -e .env.production -e node_modules
 
             pnpm install --frozen-lockfile
             pnpm build
@@ -81,5 +81,5 @@ jobs:
             pm2 save
 
             # basic health check, fail the deploy if app doesn't come up
-            sleep 3
+            sleep 8
             curl -sf http://localhost:8001/health || (echo "Health check failed" && exit 1)
