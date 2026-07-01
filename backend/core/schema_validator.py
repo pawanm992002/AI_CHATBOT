@@ -376,7 +376,7 @@ COLLECTION_SCHEMAS = {
                                 "placeholder": {"bsonType": ["string", "null"]},
                                 "options": {"bsonType": ["array", "null"], "items": {"bsonType": "string"}},
                                 "order": {"bsonType": "int"},
-                                "field_role": {"bsonType": ["string", "null"], "enum": ["name", "email", "phone", null]},
+                                "field_role": {"bsonType": ["string", "null"], "enum": ["name", "email", "phone", None]},
                             },
                         },
                     },
