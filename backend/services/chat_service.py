@@ -699,13 +699,13 @@ class ChatService:
         )
 
     async def _compact_if_needed(self, summary: str, messages: list[dict], provider: str = "openai", model: str = "gpt-4o-mini") -> tuple[str, list[dict]]:
-        if len(messages) < 32:
+        if len(messages) <= 32:
             return summary, messages
 
-        # Summarize oldest messages beyond the archival cap; archival is the sole array trimmer
-        if len(messages) > 42:
-            messages_to_summarize = messages[:-42]
-            summary = await self._summarize_past_context(summary, messages_to_summarize, provider, model)
+        # Summarize the oldest messages beyond the most recent 32, then trim to 30
+        messages_to_summarize = messages[:-32]
+        summary = await self._summarize_past_context(summary, messages_to_summarize, provider, model)
+        messages = messages[-30:]
         return summary, messages
 
     async def _summarize_past_context(self, previous_summary: str, messages_to_summarize: list[dict], provider: str = "openai", model: str = "gpt-4o-mini") -> str:

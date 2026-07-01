@@ -8,7 +8,7 @@ from botocore.config import Config
 from core.auth import db
 from core.config import settings
 
-MAX_TURNS = 20
+MAX_TURNS = 30
 
 
 _pending: set[str] = set()
@@ -52,8 +52,9 @@ class ArchivalService:
         Fire-and-forget: check if conversation has > MAX_TURNS * 2 individual messages.
         If so, pop the oldest messages beyond the most recent MAX_TURNS * 2,
         append to DO Spaces archive, then trim MongoDB messages array.
-        MAX_TURNS = 20 means 20 conversation turns = 40 individual messages.
-        Compaction (summary builder) runs first; archival is the sole array trimmer.
+        MAX_TURNS = 30 means 30 conversation turns = 60 individual messages.
+        Compaction (summary builder) runs first and trims to 30; archival is a
+        safety net that fires only if the array exceeds 60 (e.g. compaction skip).
         """
         key = f"{tenant_id}:{conversation_id}"
         if key in _pending:

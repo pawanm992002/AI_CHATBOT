@@ -90,14 +90,18 @@ visitor starts multiple sessions, all their data counts.
 ------------------------------------
 Two layers keep MongoDB fast while preserving full history:
 
-Compaction (summary builder):
-  - Fires when messages exceed 42
-  - Summarizes oldest messages into a rolling summary (gpt-4o-mini)
-  - Does NOT trim the array — archival is the sole array trimmer
+Compaction (summary builder + primary array trimmer):
+  - Fires when messages exceed 32
+  - Summarizes oldest messages beyond the most recent 32 into a
+    rolling summary (gpt-4o-mini)
+  - Trims the live array to 30 messages (most recent kept in full)
+  - Summary is injected into the LLM system prompt on subsequent turns
 
-Archival (cold storage to DO Spaces):
-  - Fires when messages exceed 40 (20 turns x 2)
-  - Oldest messages beyond the most recent 40 are:
+Archival (cold storage to DO Spaces — safety net):
+  - Fires when messages exceed 60 (30 turns x 2)
+  - Only activates if compaction was skipped or failed (normal operation
+    keeps the array at ≤30, so archival rarely fires)
+  - Oldest messages beyond the most recent 60 are:
     1. Serialized as JSONL to DO Spaces (rolling numbered parts)
     2. Trimmed from MongoDB
   - An in-memory _pending set prevents concurrent archival per conversation

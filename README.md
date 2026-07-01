@@ -842,7 +842,7 @@ Navigate to **Visitor Profiles** in the sidebar:
 
 A background task in `main.py` (`start_visitor_classification_sweep`) runs every 5 minutes:
 - Queries for visitors where `last_seen_at` is older than 5 minutes and `last_classified_at` is null or precedes `last_seen_at`
-- Calls `classify_visitor(session_id, tenant_id, trigger="auto")` as fire-and-forget for each match
+- Calls `classify_visitor(visitor_id, tenant_id, trigger="auto")` as fire-and-forget for each match
 - Uses `asyncio.ensure_future` — zero latency impact on chat or any other request path
 - Tradeoff: periodic sweep adds up to ~10 min delay (5 min inactivity + 5 min sweep interval) before classification fires. Simpler than hooking WebSocket disconnect and works for HTTP-only sessions.
 
@@ -873,14 +873,15 @@ To ensure high-performance, cost-effective conversational capability, the system
 - **Latency Optimization**: Reads bypass the database completely for active sessions, providing sub-millisecond context retrievals.
 
 ### 2. Semantic Context Summarization (Compaction)
-- **Trigger**: When the conversation history reaches 32 messages.
-- **Summarization**: When history exceeds 42 messages, the oldest messages beyond the most recent 42 are summarized into the rolling summary using `gpt-4o-mini`. The messages array is **not** trimmed by compaction — archival is the sole array trimmer.
+- **Trigger**: When the conversation history exceeds 32 messages.
+- **Summarization**: The oldest messages beyond the most recent 32 are summarized into the rolling summary using `gpt-4o-mini`.
+- **Trimming**: After summarizing, the live array is trimmed to 30 messages, keeping the most recent context in full fidelity.
 - **System Prompt Injection**: The rolling summary is automatically injected into the LLM system prompt on subsequent turns.
 
 ### 3. Cold Storage Archival (DO Spaces)
-- **Trigger**: When a turn is persisted and the `messages` array exceeds 40 items (20 conversation turns × 2).
-- **Archival**: Oldest messages beyond the most recent 40 are serialized as JSONL, written to DigitalOcean Spaces under `conversations/{tenant_id}/{session_id}/archive_{part:04d}.jsonl` using rolling numbered parts, then trimmed from MongoDB.
-- **Live Data**: MongoDB never holds more than 40 messages per conversation, keeping document writes fast and bounded.
+- **Trigger**: Safety net — when a turn is persisted and the `messages` array exceeds 60 items (30 conversation turns × 2). In normal operation compaction keeps the array at ≤30, so archival only fires if compaction was skipped or failed.
+- **Archival**: Oldest messages beyond the most recent 60 are serialized as JSONL, written to DigitalOcean Spaces under `conversations/{tenant_id}/{session_id}/archive_{part:04d}.jsonl` using rolling numbered parts, then trimmed from MongoDB.
+- **Live Data**: Under normal operation, MongoDB never holds more than 30 messages per conversation (compaction-trimmed). Archival caps it at 60 in edge cases.
 - **Full History Retrieval**: `GET /api/dashboard/conversations/{id}/full` iterates archive parts from DO Spaces and merges with live messages in chronological order.
 - **Concurrency Safety**: An in-memory `_pending` set ensures at most one archival task runs per conversation at a time — duplicate archival requests from rapid concurrent POSTs are skipped (not queued).
 - **Implementation**: `backend/services/archival_service.py` — fire-and-forget via `asyncio.ensure_future` to avoid adding latency to chat responses.
