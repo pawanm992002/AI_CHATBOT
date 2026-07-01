@@ -126,7 +126,7 @@ async def list_visitors(
         query["profile_id"] = profile_id
     if search:
         query["$or"] = [
-            {"session_id": {"$regex": search, "$options": "i"}},
+            {"visitor_id": {"$regex": search, "$options": "i"}},
             {"identity.name": {"$regex": search, "$options": "i"}},
             {"identity.email": {"$regex": search, "$options": "i"}},
         ]

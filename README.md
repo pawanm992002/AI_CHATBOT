@@ -326,13 +326,12 @@ The backend creates MongoDB indexes on startup for efficient queries:
 | `chunks` | `(tenant_id, source_id)` | Compound |
 | `pages` | `(tenant_id, url)` | Compound |
 | `pages` | `(tenant_id, source_id)` | Compound |
-| `visitors` | `session_id` | Single |
 | `visitors` | `(tenant_id, visitor_id)` | Compound |
 | `visitors` | `last_seen_at` | Single |
 | `tenants` | `tenant_id` | Unique |
 | `tenants` | `api_key` | Unique |
 | `tenants` | `domain` | Single |
-| `conversations` | `session_id` | Single |
+| `conversations` | `(session_id, tenant_id)` | Compound |
 | `crawl_jobs` | `(job_id, tenant_id)` | Compound |
 | `sources` | `(tenant_id, source_id)` | Compound |
 | `faqs` | `(tenant_id, source_id, faq_id)` | Compound |
@@ -875,16 +874,15 @@ To ensure high-performance, cost-effective conversational capability, the system
 
 ### 2. Semantic Context Summarization (Compaction)
 - **Trigger**: When the conversation history reaches 32 messages.
-- **Pruning**: The last 30 messages are kept in full fidelity to handle immediate references (pronouns, follow-ups).
-- **Summarization**: The older messages are aggregated with any existing summary into a new, consolidated rolling summary using `gpt-4o-mini`.
-- **Database Cap**: By trimming the active `messages` array down to 30 items and updating the document's `summary` field, MongoDB document size remains bounded at $O(1)$ size, avoiding unbounded array growth and slow updates.
+- **Summarization**: When history exceeds 42 messages, the oldest messages beyond the most recent 42 are summarized into the rolling summary using `gpt-4o-mini`. The messages array is **not** trimmed by compaction — archival is the sole array trimmer.
 - **System Prompt Injection**: The rolling summary is automatically injected into the LLM system prompt on subsequent turns.
 
 ### 3. Cold Storage Archival (DO Spaces)
-- **Trigger**: When a turn is persisted and the `messages` array exceeds 20 items.
-- **Archival**: Oldest turns are popped from the array, serialized as JSONL, and written to DigitalOcean Spaces under `conversations/{tenant_id}/{session_id}/archive_{part:04d}.jsonl` using rolling numbered parts.
-- **Live Data**: MongoDB never holds more than 20 messages per conversation, keeping document writes fast and bounded.
+- **Trigger**: When a turn is persisted and the `messages` array exceeds 40 items (20 conversation turns × 2).
+- **Archival**: Oldest messages beyond the most recent 40 are serialized as JSONL, written to DigitalOcean Spaces under `conversations/{tenant_id}/{session_id}/archive_{part:04d}.jsonl` using rolling numbered parts, then trimmed from MongoDB.
+- **Live Data**: MongoDB never holds more than 40 messages per conversation, keeping document writes fast and bounded.
 - **Full History Retrieval**: `GET /api/dashboard/conversations/{id}/full` iterates archive parts from DO Spaces and merges with live messages in chronological order.
+- **Concurrency Safety**: An in-memory `_pending` set ensures at most one archival task runs per conversation at a time — duplicate archival requests from rapid concurrent POSTs are skipped (not queued).
 - **Implementation**: `backend/services/archival_service.py` — fire-and-forget via `asyncio.ensure_future` to avoid adding latency to chat responses.
 
 ## Key Design Decisions

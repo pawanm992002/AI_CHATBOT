@@ -92,6 +92,7 @@ The e2e test creates a tenant, approves it, tests visitor profiles, chat, conver
 - Rate limiting: 3 layers — per-IP, per-tenant, per-session (Redis sorted sets, sliding window)
 - Schema validation enforced on startup via JSON Schema in `core/schema_validator.py`
 - Periodic background sweep in `main.py` auto-classifies visitors after inactivity (5 min sweep, 5 min timeout)
+- All visitor/conversation queries must include `tenant_id` alongside `visitor_id` or `session_id` for multi-tenant isolation
 
 ### Frontend (TypeScript/React)
 - Dashboard: SPA with react-router-dom, private/admin routes, TailwindCSS dark theme (slate-950)
@@ -110,15 +111,15 @@ The e2e test creates a tenant, approves it, tests visitor profiles, chat, conver
 |---|---|
 | `backend/core/config.py` | Pydantic Settings, env variable loading |
 | `backend/core/auth.py` | JWT creation/verification, API key auth, rate limiter |
-| `backend/services/chat_service.py` | Core chat pipeline (classify, search, answer, tool calling for lead forms, log gaps, personalized greeting) |
+| `backend/services/chat_service.py` | Core chat pipeline (classify, search, answer, tool calling for lead forms, log gaps, personalized greeting) — all conversation queries scoped by `(session_id, tenant_id)` |
 | `backend/services/vector_search.py` | Hybrid vector + BM25 search |
 | `backend/services/ingestion.py` | Document chunking/embedding pipeline |
 | `backend/services/embedder.py` | OpenAI embeddings via LangChain `OpenAIEmbeddings` |
 | `backend/services/llm/factory.py` | Provider-agnostic LLM factory (OpenAI, Groq, OpenRouter) — `get_llm()`, `get_llm_raw()`, `_to_lc_messages()`, `extract_usage()` |
 | `backend/services/llm/pricing.py` | Centralized LLM pricing table and `calculate_cost()` for cost estimation |
 | `backend/services/admin_analytics_service.py` | MongoDB aggregation pipelines for platform-wide analytics (overview, timeseries, per-tenant, model leaderboard) |
-| `backend/services/archival_service.py` | Hot/cold conversation storage — archives old turns to DO Spaces, retrieves full history |
-| `backend/services/visitor_profile_service.py` | Visitor classification (rule-based + LLM fallback, accepts `trigger` param for auto/manual) |
+| `backend/services/archival_service.py` | Hot/cold conversation storage — archives old turns (>40 msgs) to DO Spaces, `_pending` set prevents concurrent archival per conversation |
+| `backend/services/visitor_profile_service.py` | Visitor classification (rule-based + LLM fallback, accepts `trigger` param for auto/manual) — queries by `visitor_id` + `tenant_id` |
 | `backend/core/rate_limiter.py` | Redis-based sliding window rate limiter (per-IP, per-tenant, per-session) |
 | `apps/widget/src/components/ErrorBoundary.tsx` | React error boundary preventing widget crashes from killing WebSocket |
 | `backend/core/schema_validator.py` | MongoDB JSON schema validators (18 collections) |
