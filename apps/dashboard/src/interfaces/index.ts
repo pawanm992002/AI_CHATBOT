@@ -52,6 +52,7 @@ export interface Lead {
   message: string;
   form_id?: string;
   custom_fields?: Record<string, string>;
+  visitor_id?: string;
   created_at: string;
 }
 
@@ -63,6 +64,7 @@ export interface LeadFormField {
   placeholder?: string;
   options?: string[];
   order: number;
+  field_role?: 'name' | 'email' | 'phone' | null;
 }
 
 export interface LeadFormConfig {
@@ -73,6 +75,50 @@ export interface LeadFormConfig {
   enabled: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface VisitorProfile {
+  profile_id: string;
+  name: string;
+  description: string;
+  color: string;
+  rules: ProfileRule[];
+  llm_criteria?: string | null;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProfileRule {
+  type: 'page_visited' | 'lead_form_field' | 'message_count_gte' | 'keyword_match' | 'utm_source';
+  priority: number;
+  pattern?: string;
+  field_key?: string;
+  count?: number;
+  keywords?: string[];
+  sources?: string[];
+}
+
+export interface VisitorIdentity {
+  name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  updated_at?: string | null;
+  source_lead_id?: string | null;
+}
+
+export interface Visitor {
+  session_id: string;
+  tenant_id: string;
+  first_seen_at?: string;
+  last_seen_at?: string;
+  conversation_ids: string[];
+  total_messages: number;
+  profile_id?: string | null;
+  profile_label?: string | null;
+  profile_confidence?: number | null;
+  identity?: VisitorIdentity;
+  utm_source?: string;
 }
 
 export interface KnowledgeGap {

@@ -87,6 +87,7 @@ class LeadFormFieldInput(BaseModel):
     placeholder: Optional[str] = None
     options: Optional[List[str]] = None
     order: int = 0
+    field_role: Optional[str] = Field(default=None, pattern=r"^(name|email|phone)?$")
 
 
 class LeadFormConfigCreateRequest(BaseModel):

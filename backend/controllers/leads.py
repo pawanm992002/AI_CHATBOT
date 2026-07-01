@@ -98,6 +98,7 @@ async def create_lead_form(
             "placeholder": f.placeholder,
             "options": f.options,
             "order": f.order if f.order else i,
+            "field_role": f.field_role,
         })
 
     config_data = {
@@ -145,6 +146,7 @@ async def update_lead_form(
                 "placeholder": f.placeholder,
                 "options": f.options,
                 "order": f.order if f.order else i,
+                "field_role": f.field_role,
             })
         update_data["fields"] = fields
 
@@ -227,21 +229,35 @@ async def submit_lead(req: LeadSubmitRequest, request: Request, current_tenant: 
     email = req.email or custom_fields.get("email", "")
     phone = req.phone or custom_fields.get("phone", "")
 
-    if req.form_id and not (name and email):
+    # Resolve field_role mappings from form config to identity fields
+    identity_fields = {}  # "name" | "email" | "phone" -> value
+    if req.form_id:
         form_config = await form_config_repo.get_by_form_id(tenant_id, req.form_id)
         if form_config:
             for field in form_config.get("fields", []):
                 fid = field.get("field_id", "")
                 label = field.get("label", "").lower()
                 ftype = field.get("type", "")
+                field_role = field.get("field_role")
                 val = custom_fields.get(fid, "")
+                if field_role and val:
+                    identity_fields[field_role] = val
                 if not name and ("name" in label or ftype == "name"):
                     name = val
-                elif not email and ("email" in label or ftype == "email"):
+                if not email and ("email" in label or ftype == "email"):
                     email = val
-                elif not phone and ("phone" in label or "mobile" in label or "contact" in label or ftype == "phone"):
+                if not phone and ("phone" in label or "mobile" in label or "contact" in label or ftype == "phone"):
                     phone = val
 
+    # Override with field_role values if available
+    if "name" in identity_fields:
+        name = identity_fields["name"]
+    if "email" in identity_fields:
+        email = identity_fields["email"]
+    if "phone" in identity_fields:
+        phone = identity_fields["phone"]
+
+    now = datetime.now(timezone.utc)
     lead = {
         "lead_id": str(uuid.uuid4()),
         "tenant_id": tenant_id,
@@ -254,10 +270,28 @@ async def submit_lead(req: LeadSubmitRequest, request: Request, current_tenant: 
         "source_url": "",
         "form_id": req.form_id or "",
         "custom_fields": custom_fields,
-        "created_at": datetime.now(timezone.utc),
+        "visitor_id": session_id,
+        "created_at": now,
     }
 
     await lead_repo.create(lead)
+
+    # Sync identity to visitor record
+    if session_id and (name or email or phone):
+        identity_update = {}
+        if name:
+            identity_update["identity.name"] = name
+        if email:
+            identity_update["identity.email"] = email
+        if phone:
+            identity_update["identity.phone"] = phone
+        identity_update["identity.updated_at"] = now
+        identity_update["identity.source_lead_id"] = lead["lead_id"]
+
+        await db.visitors.update_one(
+            {"session_id": session_id, "tenant_id": tenant_id},
+            {"$set": identity_update},
+        )
 
     return LeadSubmitResponse(success=True, message="Thank you! We'll get back to you soon.")
 

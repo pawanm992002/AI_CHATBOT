@@ -112,6 +112,7 @@ export const LeadFormBuilder = ({ existingForms, selectedFormId, onSaved }: Lead
           placeholder: f.placeholder || null,
           options: f.type === 'select' ? f.options : null,
           order: i,
+          field_role: f.field_role || null,
         })),
         trigger_instructions: triggerInstructions.trim(),
         enabled,
@@ -308,6 +309,21 @@ export const LeadFormBuilder = ({ existingForms, selectedFormId, onSaved }: Lead
                           <ToggleLeft size={28} className="text-slate-600" />
                         )}
                       </button>
+                    </div>
+                    <div>
+                      <label className="text-xxs font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
+                        Maps to
+                      </label>
+                      <select
+                        value={field.field_role || ''}
+                        onChange={(e) => updateField(index, { field_role: (e.target.value || null) as 'name' | 'email' | 'phone' | null })}
+                        className="w-full rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-xs text-slate-200 focus:border-violet-600 focus:outline-none cursor-pointer mt-1"
+                      >
+                        <option value="">None</option>
+                        <option value="name">Name</option>
+                        <option value="email">Email</option>
+                        <option value="phone">Phone</option>
+                      </select>
                     </div>
                   </div>
 

@@ -39,7 +39,13 @@ sequenceDiagram
     API->>Regex: Check if greeting (hi, hello, etc.)
     alt Is greeting
         Regex-->>API: Match found
-        API-->>Widget: "Hello! Welcome to {domain}..."
+        alt Has visitor identity name
+            API->>DB: Lookup visitor identity
+            DB-->>API: {name: "John"}
+            API-->>Widget: "Hi John, welcome back to {domain}..."
+        else Anonymous visitor
+            API-->>Widget: "Hello! Welcome to {domain}..."
+        end
     end
     
     Step 2: LLM Rewrite + Vector Search
@@ -769,8 +775,18 @@ Visitor: "Can I get a quote for 50 users?"
 ### Dashboard UI
 
 Navigate to **Leads** in the sidebar:
-- **View Leads tab** — Table of all submissions with Name, Email, Phone, Message, Date
-- **Form Builder tab** — Create and configure lead forms with a visual builder
+- **View Leads tab** — Table of all submissions with Name, Email, Phone, Message, Date, and visitor profile badge
+- **Form Builder tab** — Create and configure lead forms with a visual builder, including field-to-identity mapping (Name/Email/Phone)
+
+### Visitor Identity Capture via Lead Forms
+
+When a lead form is submitted, if any field has a `field_role` of `name`, `email`, or `phone`, the visitor's identity is automatically synced to the `visitors` collection:
+
+1. **Field Role Mapping**: In the Form Builder, each field can be mapped to a role: **None**, **Name**, **Email**, or **Phone**.
+2. **Identity Upsert**: On lead submission, the backend resolves the `field_role` from the form config and upserts the visitor's identity (`name`, `email`, `phone`, `source_lead_id`) into the `visitors` document.
+3. **Personalized Greeting**: On subsequent visits, the chat greeting becomes `"Hi {name}, welcome back to {domain}..."` when a known identity exists.
+4. **Identity Context**: The visitor's name is injected into the LLM system prompt for context-aware conversations.
+5. **Manual Override**: Dashboard admins can edit or clear a visitor's identity via the **Visitor Profiles** page.
 
 ### Guardrails
 
@@ -780,7 +796,37 @@ The chatbot avoids answering irrelevant questions through vector search scoring:
 2. **LLM classifier**: Classifies the query as `OUT_OF_SCOPE` (unrelated to business) or `KNOWLEDGE_GAP` (related but missing answer).
 3. **Hardened system prompt**: The RAG prompt instructs GPT — "If the context does not contain information relevant to the user's question, say you don't have that information."
 
-## Rate Limiting & Abuse Protection
+## Visitor Profiles
+
+Tenants can define visitor profiles with classification rules to segment their visitors (e.g., "Free Tier User", "Enterprise Prospect", "Support Seeker") for analytics and targeted conversations.
+
+### Classification Pipeline
+
+Profiles are structured as a prioritized list of rules (first match wins). The classification runs as a **fire-and-forget background task** during chat to avoid adding latency:
+
+1. **Rule-Based Classification**: Evaluates rules in `priority` order. Supported rule types:
+   - `page_visited` — Visitor visited a URL matching a regex pattern
+   - `lead_form_field` — A lead form field contains a matching value
+   - `message_count_gte` — Visitor has sent at least N messages
+   - `keyword_match` — Any message matched a keyword or regex
+   - `utm_source` — Visitor's UTM source parameter matches a value
+
+2. **LLM Fallback**: If no rule matches, uses `gpt-4o-mini` with structured output to classify based on the full conversation transcript + profile descriptions + optional LLM criteria.
+
+3. **Result Storage**: The classification result (`profile_id`, `profile_label`, `confidence`, `source` as `rule`/`llm`) is written to the `visitors` document with a history trail.
+
+### Dashboard UI
+
+Navigate to **Visitor Profiles** in the sidebar:
+- **Profile List** — Sidebar with all profiles, each showing a colored badge and enabled toggle
+- **Profile Editor** — Detail view with name, color picker, description, rule builder, LLM criteria textarea
+- **Rule Builder** — Type-specific inputs for each rule type (URL pattern, field key, keyword textarea, etc.)
+- **Visitor List** — Searchable/filterable grid showing all visitors with their classified profile badge
+- **Manual Operations** — Reclassify a visitor, override their profile, or edit their identity
+
+### Profile Distribution Analytics
+
+The **Tenant Analytics** page includes a profile distribution bar chart showing the count and percentage of visitors in each profile, including an "Unclassified" row for visitors with no matched profile.
 
 Three layers of rate limiting protect the chat endpoint:
 
@@ -810,6 +856,13 @@ To ensure high-performance, cost-effective conversational capability, the system
 - **Summarization**: The older messages are aggregated with any existing summary into a new, consolidated rolling summary using `gpt-4o-mini`.
 - **Database Cap**: By trimming the active `messages` array down to 30 items and updating the document's `summary` field, MongoDB document size remains bounded at $O(1)$ size, avoiding unbounded array growth and slow updates.
 - **System Prompt Injection**: The rolling summary is automatically injected into the LLM system prompt on subsequent turns.
+
+### 3. Cold Storage Archival (DO Spaces)
+- **Trigger**: When a turn is persisted and the `messages` array exceeds 20 items.
+- **Archival**: Oldest turns are popped from the array, serialized as JSONL, and written to DigitalOcean Spaces under `conversations/{tenant_id}/{session_id}/archive_{part:04d}.jsonl` using rolling numbered parts.
+- **Live Data**: MongoDB never holds more than 20 messages per conversation, keeping document writes fast and bounded.
+- **Full History Retrieval**: `GET /api/dashboard/conversations/{id}/full` iterates archive parts from DO Spaces and merges with live messages in chronological order.
+- **Implementation**: `backend/services/archival_service.py` — fire-and-forget via `asyncio.ensure_future` to avoid adding latency to chat responses.
 
 ## Key Design Decisions
 
@@ -1113,13 +1166,33 @@ The embeddable chat widget (`apps/widget/`) is built as a self-executing IIFE bu
 ### Leads
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
-| POST | `/api/leads` | API Key | Submit lead/enquiry form (supports dynamic fields) |
+| POST | `/api/leads` | API Key | Submit lead/enquiry form (supports dynamic fields, syncs identity to visitor) |
 | GET | `/api/dashboard/leads` | JWT | List all leads for tenant |
 | GET | `/api/lead-forms` | JWT | List all lead form configs for tenant |
-| POST | `/api/lead-forms` | JWT | Create a new lead form config |
+| POST | `/api/lead-forms` | JWT | Create a new lead form config (includes `field_role` for identity mapping) |
 | PUT | `/api/lead-forms/{form_id}` | JWT | Update a lead form config |
 | DELETE | `/api/lead-forms/{form_id}` | JWT | Delete a lead form config |
 | GET | `/api/widget/lead-forms` | API Key | Get all active lead form configs for widget |
+
+### Visitor Profiles
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| GET | `/api/dashboard/visitor-profiles` | JWT | List tenant's visitor profiles |
+| POST | `/api/dashboard/visitor-profiles` | JWT | Create a visitor profile |
+| PUT | `/api/dashboard/visitor-profiles/{profile_id}` | JWT | Update a visitor profile |
+| DELETE | `/api/dashboard/visitor-profiles/{profile_id}` | JWT | Delete a visitor profile |
+| GET | `/api/dashboard/visitor-profiles/stats` | JWT | Profile distribution stats (counts per profile) |
+| GET | `/api/dashboard/visitors` | JWT | List visitors (filterable by `profile_id`, search by name/email) |
+| GET | `/api/dashboard/visitors/{visitor_id}` | JWT | Visitor detail with identity and linked leads |
+| POST | `/api/dashboard/visitors/{visitor_id}/reclassify` | JWT | Manually trigger reclassification |
+| PUT | `/api/dashboard/visitors/{visitor_id}/profile` | JWT | Manually override a visitor's profile |
+| PUT | `/api/dashboard/visitors/{visitor_id}/identity` | JWT | Manually edit visitor's stored identity |
+| DELETE | `/api/dashboard/visitors/{visitor_id}/identity` | JWT | Clear visitor's stored identity fields |
+
+### Conversations
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| GET | `/api/dashboard/conversations/{conversation_id}/full` | JWT | Full conversation history (merged MongoDB + DO Spaces archive) |
 
 ### System Admin
 | Method | Endpoint | Auth | Description |
@@ -1137,6 +1210,7 @@ The embeddable chat widget (`apps/widget/`) is built as a self-executing IIFE bu
 | GET | `/api/admin/analytics/timeseries` | JWT (admin) | Time-series data for charts (cached 30s) |
 | GET | `/api/admin/analytics/tenants` | JWT (admin) | Per-tenant usage breakdown |
 | GET | `/api/admin/analytics/tenant/{tenantId}` | JWT (admin) | Detailed tenant analytics |
+| GET | `/api/admin/analytics/tenant/{tenantId}/profile-stats` | JWT (admin) | Visitor profile distribution for a tenant |
 | GET | `/api/admin/analytics/top-tenants` | JWT (admin) | Top tenants by usage with costs |
 | GET | `/api/admin/analytics/models` | JWT (admin) | Model usage leaderboard |
 
@@ -1155,7 +1229,8 @@ The embeddable chat widget (`apps/widget/`) is built as a self-executing IIFE bu
 | `visitors` | Visitor tracking (IP, page views, messages) |
 | `faqs` | FAQ Q&A pairs |
 | `documents` | Text document content |
-| `leads` | Enquiry form submissions (includes `custom_fields` for dynamic form data) |
-| `lead_form_configs` | Lead form configurations (fields, trigger instructions, enabled status) |
+| `leads` | Enquiry form submissions (includes `custom_fields` for dynamic form data, `visitor_id`) |
+| `lead_form_configs` | Lead form configurations (fields, trigger instructions, enabled status, `field_role` for identity mapping) |
 | `message_feedback` | Like/dislike feedback on AI responses |
 | `knowledge_gaps` | Unanswered queries with embeddings, gap_type, and similarity clustering |
+| `visitor_profiles` | Tenant-defined visitor classification rules, LLM criteria, enabled status |

@@ -10,7 +10,8 @@ import {
   X,
   Bot,
   Clock,
-  Brain
+  Brain,
+  Tag,
 } from 'lucide-react';
 import { publicAxios } from '../utils/axios';
 import { useStore } from '../store';
@@ -43,6 +44,7 @@ export const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
       badge: state.gapsCount > 0 ? state.gapsCount : undefined 
     },
     { label: 'Leads', icon: Users, path: '/leads' },
+    { label: 'Visitor Profiles', icon: Tag, path: '/visitor-profiles' },
     { label: 'AI Provider', icon: Brain, path: '/ai-provider' },
     { label: 'Settings', icon: Settings, path: '/settings' },
   ];

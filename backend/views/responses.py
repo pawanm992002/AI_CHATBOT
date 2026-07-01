@@ -146,6 +146,7 @@ class LeadFormFieldResponse(BaseModel):
     placeholder: Optional[str] = None
     options: Optional[List[str]] = None
     order: int
+    field_role: Optional[str] = None
 
 
 class LeadFormConfigResponse(BaseModel):

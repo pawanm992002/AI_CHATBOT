@@ -227,6 +227,7 @@ COLLECTION_SCHEMAS = {
                     "source_url": {"bsonType": "string"},
                     "form_id": {"bsonType": ["string", "null"]},
                     "custom_fields": {"bsonType": ["object", "null"]},
+                    "visitor_id": {"bsonType": ["string", "null"]},
                     "created_at": {"bsonType": "date"},
                 },
             }
@@ -257,6 +258,9 @@ COLLECTION_SCHEMAS = {
                             },
                         },
                     },
+                    "archived": {"bsonType": "bool"},
+                    "archive_key": {"bsonType": ["string", "null"]},
+                    "archived_turn_count": {"bsonType": "int"},
                 },
             }
         },
@@ -298,6 +302,35 @@ COLLECTION_SCHEMAS = {
                             },
                         },
                     },
+                    "profile_id": {"bsonType": ["string", "null"]},
+                    "profile_label": {"bsonType": ["string", "null"]},
+                    "profile_confidence": {"bsonType": ["double", "null"]},
+                    "profile_history": {
+                        "bsonType": "array",
+                        "items": {
+                            "bsonType": "object",
+                            "required": ["profile_id", "profile_label", "assigned_at", "reason", "source"],
+                            "properties": {
+                                "profile_id": {"bsonType": "string"},
+                                "profile_label": {"bsonType": "string"},
+                                "assigned_at": {"bsonType": "date"},
+                                "reason": {"bsonType": "string"},
+                                "source": {"enum": ["rule", "llm"]},
+                            },
+                        },
+                    },
+                    "last_classified_at": {"bsonType": ["date", "null"]},
+                    "identity": {
+                        "bsonType": "object",
+                        "properties": {
+                            "name": {"bsonType": ["string", "null"]},
+                            "email": {"bsonType": ["string", "null"]},
+                            "phone": {"bsonType": ["string", "null"]},
+                            "updated_at": {"bsonType": ["date", "null"]},
+                            "source_lead_id": {"bsonType": ["string", "null"]},
+                        },
+                    },
+                    "utm_source": {"bsonType": ["string", "null"]},
                 },
             }
         },
@@ -343,10 +376,43 @@ COLLECTION_SCHEMAS = {
                                 "placeholder": {"bsonType": ["string", "null"]},
                                 "options": {"bsonType": ["array", "null"], "items": {"bsonType": "string"}},
                                 "order": {"bsonType": "int"},
+                                "field_role": {"bsonType": ["string", "null"], "enum": ["name", "email", "phone", null]},
                             },
                         },
                     },
                     "trigger_instructions": {"bsonType": "string"},
+                    "enabled": {"bsonType": "bool"},
+                    "created_at": {"bsonType": "date"},
+                    "updated_at": {"bsonType": "date"},
+                },
+            }
+        },
+        "validationLevel": "moderate",
+        "validationAction": "error",
+    },
+    "visitor_profiles": {
+        "validator": {
+            "$jsonSchema": {
+                "bsonType": "object",
+                "required": ["profile_id", "tenant_id", "name", "description", "color", "rules", "enabled", "created_at", "updated_at"],
+                "properties": {
+                    "profile_id": {"bsonType": "string"},
+                    "tenant_id": {"bsonType": "string"},
+                    "name": {"bsonType": "string"},
+                    "description": {"bsonType": "string"},
+                    "color": {"bsonType": "string"},
+                    "rules": {
+                        "bsonType": "array",
+                        "items": {
+                            "bsonType": "object",
+                            "required": ["type"],
+                            "properties": {
+                                "type": {"enum": ["page_visited", "lead_form_field", "message_count_gte", "keyword_match", "utm_source"]},
+                                "priority": {"bsonType": "int"},
+                            },
+                        },
+                    },
+                    "llm_criteria": {"bsonType": ["string", "null"]},
                     "enabled": {"bsonType": "bool"},
                     "created_at": {"bsonType": "date"},
                     "updated_at": {"bsonType": "date"},

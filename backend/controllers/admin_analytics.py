@@ -70,3 +70,27 @@ async def model_leaderboard(
 ):
     """Return per-model usage leaderboard."""
     return await admin_analytics_service.get_model_leaderboard(period=period)
+
+
+@router.get("/tenant/{tenant_id}/profile-stats")
+async def tenant_profile_stats(
+    tenant_id: str,
+    admin: dict = Depends(get_current_admin),
+):
+    """Return visitor profile distribution for a tenant."""
+    from core.auth import db
+    pipeline = [
+        {"$match": {"tenant_id": tenant_id, "profile_id": {"$ne": None}}},
+        {"$group": {"_id": "$profile_id", "label": {"$first": "$profile_label"}, "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+    ]
+    results = await db.visitors.aggregate(pipeline).to_list(100)
+    total = await db.visitors.count_documents({"tenant_id": tenant_id})
+    items = [
+        {"profile_id": r["_id"], "label": r.get("label"), "count": r["count"], "percentage": round(r["count"] / total * 100, 1) if total > 0 else 0}
+        for r in results
+    ]
+    unclassified = total - sum(r["count"] for r in results)
+    if unclassified > 0:
+        items.append({"profile_id": None, "label": "Unclassified", "count": unclassified, "percentage": round(unclassified / total * 100, 1) if total > 0 else 0})
+    return {"items": items, "total": total}
