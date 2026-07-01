@@ -264,7 +264,7 @@ async def _upsert_visitor(
     try:
         now = datetime.now(timezone.utc)
         visitor = await db.visitors.find_one(
-            {"session_id": session_id, "tenant_id": tenant_id},
+            {"visitor_id": session_id, "tenant_id": tenant_id},
             {"ip_history": {"$slice": -1}, "page_views": {"$slice": -1}},
         )
 
@@ -282,6 +282,7 @@ async def _upsert_visitor(
         push: dict[str, object] = {}
         if not visitor:
             update["$setOnInsert"] = {
+                "visitor_id": session_id,
                 "session_id": session_id,
                 "first_seen_at": now,
                 "conversation_ids": [],
@@ -300,6 +301,6 @@ async def _upsert_visitor(
         if push:
             update["$push"] = push
 
-        await db.visitors.update_one({"session_id": session_id, "tenant_id": tenant_id}, update, upsert=True)
+        await db.visitors.update_one({"visitor_id": session_id, "tenant_id": tenant_id}, update, upsert=True)
     except Exception as e:
         print(f"[UPSERT] visitor error for session={session_id}: {e}")

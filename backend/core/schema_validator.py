@@ -316,6 +316,7 @@ COLLECTION_SCHEMAS = {
                                 "assigned_at": {"bsonType": "date"},
                                 "reason": {"bsonType": "string"},
                                 "source": {"enum": ["rule", "llm"]},
+                                "trigger": {"enum": ["auto", "manual"]},
                             },
                         },
                     },

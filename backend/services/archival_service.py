@@ -37,17 +37,19 @@ class ArchivalService:
          start a new part. Each part is immutable once sealed.
          Writes stay small and cheap regardless of total history size.
     - We choose strategy 2 (rolling parts) to keep write costs low and bounded.
-      The `archive_part` counter is stored in the conversation's `archived_turn_count`
-      divided by MAX_TURNS (roughly), but we track it explicitly via archive keys.
+      The `archive_part` counter is derived from `archived_turn_count // (MAX_TURNS * 2)`
+      where archived_turn_count stores individual message count.
     """
 
     async def archive_overflow_turns(
         self, conversation_id: str, tenant_id: str
     ) -> None:
         """
-        Fire-and-forget: check if conversation has > MAX_TURNS turns.
-        If so, pop the oldest turn(s) beyond the most recent MAX_TURNS,
+        Fire-and-forget: check if conversation has > MAX_TURNS * 2 individual messages.
+        If so, pop the oldest messages beyond the most recent MAX_TURNS * 2,
         append to DO Spaces archive, then trim MongoDB messages array.
+        MAX_TURNS = 20 means 20 conversation turns = 40 individual messages.
+        Compaction (summary builder) runs first; archival is the sole array trimmer.
         """
         try:
             await self._archive_overflow_inner(conversation_id, tenant_id)
@@ -66,14 +68,14 @@ class ArchivalService:
         messages = conv.get("messages", [])
         turn_count = len(messages)
 
-        if turn_count <= MAX_TURNS:
+        if turn_count <= MAX_TURNS * 2:
             return
 
-        turns_to_archive = turn_count - MAX_TURNS
-        turns_to_keep = messages[-MAX_TURNS:]
+        turns_to_archive = turn_count - MAX_TURNS * 2
+        turns_to_keep = messages[-(MAX_TURNS * 2):]
         turns_to_move = messages[:turns_to_archive]
 
-        archive_part = conv.get("archived_turn_count", 0) // MAX_TURNS + 1
+        archive_part = conv.get("archived_turn_count", 0) // (MAX_TURNS * 2) + 1
 
         lines = []
         for i in range(0, len(turns_to_move), 2):

@@ -73,6 +73,7 @@ class VisitorProfileHistoryEntry(BaseModel):
     assigned_at: datetime
     reason: str
     source: Literal["rule", "llm"]
+    trigger: Literal["auto", "manual"] = "auto"
 
 class VisitorIdentity(BaseModel):
     name: Optional[str] = None

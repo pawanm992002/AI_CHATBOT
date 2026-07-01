@@ -142,6 +142,8 @@ async def ensure_lookup_indexes():
         await db.pages.create_index([("tenant_id", 1), ("url", 1)])
         await db.pages.create_index([("tenant_id", 1), ("source_id", 1)])
         await db.visitors.create_index("session_id")
+        await db.visitors.create_index("last_seen_at")
+        await db.visitors.create_index([("tenant_id", 1), ("visitor_id", 1)])
         await db.tenants.create_index("tenant_id", unique=True)
         await db.tenants.create_index("api_key", unique=True)
         await db.tenants.create_index("domain")
@@ -161,6 +163,57 @@ async def ensure_lookup_indexes():
         await db.lead_form_configs.create_index([("tenant_id", 1), ("enabled", 1)])
     except Exception as e:
         print(f"Startup: ensure_lookup_indexes failed: {e}")
+
+
+@app.on_event("startup")
+async def start_visitor_classification_sweep():
+    """
+    Periodic background sweep that auto-classifies visitors after session inactivity.
+    
+    Every 5 minutes, finds visitors whose last_seen_at is older than the inactivity
+    threshold (5 min) and who haven't been classified since their last activity.
+    Runs classify_visitor as fire-and-forget to avoid blocking.
+    
+    Tradeoff: periodic sweep adds up to INACTIVITY_TIMEOUT + SWEEP_INTERVAL delay
+    before classification fires. This is simpler than hooking WebSocket disconnect
+    and works for HTTP-only sessions too.
+    """
+    import asyncio
+    from datetime import datetime, timezone, timedelta
+    from core.auth import db
+    from services.visitor_profile_service import VisitorProfileService
+
+    INACTIVITY_TIMEOUT_MINUTES = 5
+    SWEEP_INTERVAL_SECONDS = 300  # 5 minutes
+
+    svc = VisitorProfileService()
+
+    async def _sweep():
+        while True:
+            try:
+                await asyncio.sleep(SWEEP_INTERVAL_SECONDS)
+                threshold = datetime.now(timezone.utc) - timedelta(minutes=INACTIVITY_TIMEOUT_MINUTES)
+                cursor = db.visitors.find({
+                    "last_seen_at": {"$lt": threshold},
+                    "$or": [
+                        {"last_classified_at": None},
+                        {"$expr": {"$lt": ["$last_classified_at", "$last_seen_at"]}},
+                    ],
+                }, {"visitor_id": 1, "tenant_id": 1})
+                count = 0
+                async for v in cursor:
+                    asyncio.ensure_future(
+                        svc.classify_visitor(v["visitor_id"], v["tenant_id"], trigger="auto")
+                    )
+                    count += 1
+                if count:
+                    print(f"[CLASSIFICATION_SWEEP] Triggered auto-classification for {count} visitor(s)")
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(f"[CLASSIFICATION_SWEEP] Error: {e}")
+
+    asyncio.ensure_future(_sweep())
 
 
 @app.on_event("shutdown")

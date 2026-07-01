@@ -151,14 +151,14 @@ async def get_visitor(
 ):
     tenant_id = current_tenant["tenant_id"]
     visitor = await db.visitors.find_one(
-        {"session_id": visitor_id, "tenant_id": tenant_id},
+        {"visitor_id": visitor_id, "tenant_id": tenant_id},
         {"_id": 0},
     )
     if not visitor:
         raise HTTPException(status_code=404, detail="Visitor not found")
 
     leads_cursor = db.leads.find(
-        {"session_id": visitor_id, "tenant_id": tenant_id},
+        {"visitor_id": visitor_id, "tenant_id": tenant_id},
         {"_id": 0},
     ).sort("created_at", -1)
     leads = await leads_cursor.to_list(length=100)
@@ -172,7 +172,7 @@ async def reclassify_visitor(
     current_tenant: dict = Depends(get_current_tenant),
 ):
     tenant_id = current_tenant["tenant_id"]
-    await _service.classify_visitor(visitor_id, tenant_id)
+    await _service.classify_visitor(visitor_id, tenant_id, trigger="manual")
     return {"status": "ok", "message": "Reclassification triggered"}
 
 
@@ -201,7 +201,7 @@ async def set_visitor_profile(
 
     if profile_id:
         await db.visitors.update_one(
-            {"session_id": visitor_id, "tenant_id": tenant_id},
+            {"visitor_id": visitor_id, "tenant_id": tenant_id},
             {
                 "$set": update,
                 "$push": {
@@ -211,13 +211,14 @@ async def set_visitor_profile(
                         "assigned_at": now,
                         "reason": payload.get("reason", "Manual override"),
                         "source": "rule",
+                        "trigger": "manual",
                     }
                 },
             },
         )
     else:
         await db.visitors.update_one(
-            {"session_id": visitor_id, "tenant_id": tenant_id},
+            {"visitor_id": visitor_id, "tenant_id": tenant_id},
             {"$set": update},
         )
 
@@ -239,7 +240,7 @@ async def update_visitor_identity(
     }
 
     await db.visitors.update_one(
-        {"session_id": visitor_id, "tenant_id": tenant_id},
+        {"visitor_id": visitor_id, "tenant_id": tenant_id},
         {"$set": {"identity": identity}},
     )
     return {"status": "ok"}
@@ -252,7 +253,7 @@ async def clear_visitor_identity(
 ):
     tenant_id = current_tenant["tenant_id"]
     await db.visitors.update_one(
-        {"session_id": visitor_id, "tenant_id": tenant_id},
+        {"visitor_id": visitor_id, "tenant_id": tenant_id},
         {"$set": {"identity": {"name": None, "email": None, "phone": None, "updated_at": None, "source_lead_id": None}}},
     )
     return {"status": "ok"}

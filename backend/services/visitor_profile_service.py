@@ -69,15 +69,15 @@ def _match_utm_source(visitor: Dict[str, Any], sources: List[str]) -> bool:
 
 class VisitorProfileService:
 
-    async def classify_visitor(self, visitor_id: str, tenant_id: str) -> None:
+    async def classify_visitor(self, visitor_id: str, tenant_id: str, trigger: str = "auto") -> None:
         try:
-            await self._classify_visitor_inner(visitor_id, tenant_id)
+            await self._classify_visitor_inner(visitor_id, tenant_id, trigger)
         except Exception as e:
             print(f"[VISITOR_PROFILE] Classification error for visitor {visitor_id}: {e}")
 
-    async def _classify_visitor_inner(self, visitor_id: str, tenant_id: str) -> None:
+    async def _classify_visitor_inner(self, visitor_id: str, tenant_id: str, trigger: str = "auto") -> None:
         visitor = await db.visitors.find_one(
-            {"session_id": visitor_id, "tenant_id": tenant_id}
+            {"visitor_id": visitor_id, "tenant_id": tenant_id}
         )
         if not visitor:
             return
@@ -145,6 +145,7 @@ class VisitorProfileService:
             "assigned_at": now,
             "reason": reason,
             "source": source,
+            "trigger": trigger,
         } if profile_id else None
 
         update = {
@@ -160,7 +161,7 @@ class VisitorProfileService:
             update["$push"] = {"profile_history": history_entry}
 
         await db.visitors.update_one(
-            {"session_id": visitor_id, "tenant_id": tenant_id},
+            {"visitor_id": visitor_id, "tenant_id": tenant_id},
             update,
         )
 

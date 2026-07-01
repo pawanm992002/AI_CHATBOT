@@ -1,0 +1,87 @@
+Visitor System — How It Works
+==============================
+
+Every person who opens the chat widget on your site becomes a "visitor"
+in the system. There are four layers: tracking, identity, profiles, and
+auto-classification.
+
+1. Tracking (automatic, every chat)
+------------------------------------
+Every time a visitor sends a message, the backend logs:
+  - Their IP address (last 20 unique IPs kept)
+  - The page URL and title they were on (last 50 pages kept)
+  - Their total message count
+  - Their session/conversation IDs
+  - Their last_seen_at timestamp
+
+This happens in the background on every chat request — no setup needed.
+You can see this data in Dashboard → Visitor Profiles → visitor list.
+
+Each visitor has a stable `visitor_id` (set on first visit from a 1-year
+cookie). All sessions from the same browser share the same `visitor_id`,
+so classification aggregates signals across all sessions.
+
+2. Identity (optional, from lead forms or manual)
+--------------------------------------------------
+If you create a lead form with field_role mappings (Name, Email, Phone),
+when a visitor submits that form their identity is automatically synced
+to their visitor record.
+
+Once identity is known:
+  - The bot greets them by name on return visits
+    ("Hi John, welcome back to {business_name}!")
+  - The LLM is told the visitor's name to use it naturally in chat
+
+You can also set or clear identity manually in the dashboard.
+
+3. Profiles (manual classification + auto sweep)
+--------------------------------------------------
+Profiles let you segment visitors into categories like "Enterprise",
+"Free Tier", "Support Seeker". You define them in the dashboard with:
+
+  - Rules: keyword_match, page_visited, message_count_gte,
+           lead_form_field, utm_source (first matching rule wins)
+  - LLM criteria: optional fallback description for gpt-4o-mini
+                   to classify when no rule matches
+
+Each classification records a `trigger` field in profile_history:
+  - "auto" — from the periodic sweep
+  - "manual" — from clicking "Reclassify" in the dashboard
+
+The profile is stored on the visitor record but currently only used
+for dashboard analytics (distribution charts, filtering). The bot
+does NOT change its behavior based on profile.
+
+4. Automatic Classification Sweep
+----------------------------------
+Every 5 minutes, a background task finds visitors whose last activity
+was more than 5 minutes ago and who haven't been classified since.
+Each visitor gets reclassified (fire-and-forget) — no latency impact
+on chat.
+
+Tradeoff: classification fires up to 5+5=10 minutes after inactivity.
+This is simpler and more reliable than hooking WebSocket disconnect.
+
+Data flow summary
+-----------------
+chat message
+  └→ _upsert_visitor (logs IP, page, timestamp; sets visitor_id)
+  └→ _track_visitor_message (increments count, adds conversation)
+
+lead form submit
+  └→ syncs identity.name/email/phone to visitor record
+  └→ next chat greeting uses name
+
+manual reclassify (dashboard)
+  └→ classify_visitor(visitor_id, trigger="manual")
+  └→ rule matching (priority order)
+  └→ LLM fallback if no rule matched
+  └→ stores profile_id + label + confidence + profile_history entry
+
+auto sweep (every 5 min)
+  └→ classify_visitor(visitor_id, trigger="auto")
+  └→ same logic as manual, but trigger="auto"
+
+Classification always queries by `visitor_id` and aggregates messages
+from ALL conversation_ids[] belonging to that visitor — so even if a
+visitor starts multiple sessions, all their data counts.

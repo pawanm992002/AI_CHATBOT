@@ -289,7 +289,7 @@ async def submit_lead(req: LeadSubmitRequest, request: Request, current_tenant: 
         identity_update["identity.source_lead_id"] = lead["lead_id"]
 
         await db.visitors.update_one(
-            {"session_id": session_id, "tenant_id": tenant_id},
+            {"visitor_id": session_id, "tenant_id": tenant_id},
             {"$set": identity_update},
         )
 

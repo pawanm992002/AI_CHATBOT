@@ -692,7 +692,7 @@ class ChatService:
 
     async def _track_visitor_message(self, session_id: str) -> None:
         await db.visitors.update_one(
-            {"session_id": session_id},
+            {"visitor_id": session_id},
             {"$addToSet": {"conversation_ids": session_id}, "$inc": {"total_messages": 1}},
         )
 
@@ -700,10 +700,11 @@ class ChatService:
         if len(messages) < 32:
             return summary, messages
 
-        messages_to_keep = messages[-30:]
-        messages_to_summarize = messages[:-30]
-        summary = await self._summarize_past_context(summary, messages_to_summarize, provider, model)
-        return summary, messages_to_keep
+        # Summarize oldest messages; archival is the sole array trimmer
+        if len(messages) > 40:
+            messages_to_summarize = messages[:-40]
+            summary = await self._summarize_past_context(summary, messages_to_summarize, provider, model)
+        return summary, messages  # Don't trim — archival manages the live array cap
 
     async def _summarize_past_context(self, previous_summary: str, messages_to_summarize: list[dict], provider: str = "openai", model: str = "gpt-4o-mini") -> str:
         formatted_history = "\n".join([
@@ -851,7 +852,7 @@ class ChatService:
     async def _get_visitor_name(self, session_id: str) -> str | None:
         try:
             visitor = await db.visitors.find_one(
-                {"session_id": session_id},
+                {"visitor_id": session_id},
                 {"identity.name": 1}
             )
             if visitor:

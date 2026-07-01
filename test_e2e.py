@@ -232,7 +232,11 @@ async def main():
 
         widget = fresh_widget()
         csid = f"{TEST_PREFIX}_conv_{uuid.uuid4().hex[:8]}"
-        for i in range(25):
+        for i in range(19):
+            await widget.post("/api/chat", json={"query": f"Test msg {i}", "session_id": csid, "current_url": "https://example.com", "current_page_title": "Test"})
+            await asyncio.sleep(0.05)
+        await asyncio.sleep(62)
+        for i in range(19, 25):
             await widget.post("/api/chat", json={"query": f"Test msg {i}", "session_id": csid, "current_url": "https://example.com", "current_page_title": "Test"})
             await asyncio.sleep(0.05)
         await asyncio.sleep(3)

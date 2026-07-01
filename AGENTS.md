@@ -91,6 +91,7 @@ The e2e test creates a tenant, approves it, tests visitor profiles, chat, conver
 - Auth: JWT in HttpOnly cookies for tenants, API key (Bearer) for widget
 - Rate limiting: 3 layers — per-IP, per-tenant, per-session (Redis sorted sets, sliding window)
 - Schema validation enforced on startup via JSON Schema in `core/schema_validator.py`
+- Periodic background sweep in `main.py` auto-classifies visitors after inactivity (5 min sweep, 5 min timeout)
 
 ### Frontend (TypeScript/React)
 - Dashboard: SPA with react-router-dom, private/admin routes, TailwindCSS dark theme (slate-950)
@@ -117,7 +118,7 @@ The e2e test creates a tenant, approves it, tests visitor profiles, chat, conver
 | `backend/services/llm/pricing.py` | Centralized LLM pricing table and `calculate_cost()` for cost estimation |
 | `backend/services/admin_analytics_service.py` | MongoDB aggregation pipelines for platform-wide analytics (overview, timeseries, per-tenant, model leaderboard) |
 | `backend/services/archival_service.py` | Hot/cold conversation storage — archives old turns to DO Spaces, retrieves full history |
-| `backend/services/visitor_profile_service.py` | Visitor classification (rule-based + LLM fallback) |
+| `backend/services/visitor_profile_service.py` | Visitor classification (rule-based + LLM fallback, accepts `trigger` param for auto/manual) |
 | `backend/core/rate_limiter.py` | Redis-based sliding window rate limiter (per-IP, per-tenant, per-session) |
 | `apps/widget/src/components/ErrorBoundary.tsx` | React error boundary preventing widget crashes from killing WebSocket |
 | `backend/core/schema_validator.py` | MongoDB JSON schema validators (18 collections) |
@@ -134,7 +135,8 @@ The e2e test creates a tenant, approves it, tests visitor profiles, chat, conver
 | `backend/repositories/visitor_profile_repository.py` | CRUD for `visitor_profiles` collection |
 | `backend/controllers/visitor_profiles.py` | Dashboard JWT-authenticated routes for profiles, visitors, identity management |
 | `backend/controllers/conversations.py` | Dashboard JWT-authenticated conversation detail + full history (merges DO Spaces archive) endpoints |
-| `packages/shared/src/types.ts` | Shared TypeScript interfaces (includes VisitorProfile, Visitor, LeadFormField with field_role)
+| `packages/shared/src/types.ts` | Shared TypeScript interfaces (includes VisitorProfile, Visitor, LeadFormField with field_role, ProfileHistoryEntry with trigger) |
+| `test_e2e.py` | End-to-end integration test (requires running server)
 
 ## Database Collections
 

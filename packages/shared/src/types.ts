@@ -44,6 +44,7 @@ export interface ProfileHistoryEntry {
   assigned_at: string;
   reason: string;
   source: 'rule' | 'llm';
+  trigger?: 'auto' | 'manual';
 }
 
 export interface VisitorIdentity {

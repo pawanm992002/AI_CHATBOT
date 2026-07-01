@@ -327,6 +327,8 @@ The backend creates MongoDB indexes on startup for efficient queries:
 | `pages` | `(tenant_id, url)` | Compound |
 | `pages` | `(tenant_id, source_id)` | Compound |
 | `visitors` | `session_id` | Single |
+| `visitors` | `(tenant_id, visitor_id)` | Compound |
+| `visitors` | `last_seen_at` | Single |
 | `tenants` | `tenant_id` | Unique |
 | `tenants` | `api_key` | Unique |
 | `tenants` | `domain` | Single |
@@ -800,9 +802,22 @@ The chatbot avoids answering irrelevant questions through vector search scoring:
 
 Tenants can define visitor profiles with classification rules to segment their visitors (e.g., "Free Tier User", "Enterprise Prospect", "Support Seeker") for analytics and targeted conversations.
 
+Classification signals (messages, page views, lead form data, conversation history) are pulled from **all** of a visitor's sessions, not just the current one.
+
+### Triggers
+
+Classification runs in two ways:
+
+| Trigger | When | How |
+|---------|------|-----|
+| **Manual** | Dashboard "Reclassify" button or `POST /api/dashboard/visitors/{visitor_id}/reclassify` | On-demand — admin or API caller decides when |
+| **Automatic** | Periodic sweep every 5 minutes | Finds visitors inactive for 5+ min who haven't been classified since last activity |
+
+Both use the same `classify_visitor()` pipeline. Each `profile_history` entry records a `trigger` field (`"auto"` or `"manual"`) to distinguish the source.
+
 ### Classification Pipeline
 
-Profiles are structured as a prioritized list of rules (first match wins). The classification runs as a **fire-and-forget background task** during chat to avoid adding latency:
+Profiles are structured as a prioritized list of rules (first match wins). Classification runs as a **fire-and-forget background task** (never blocks chat):
 
 1. **Rule-Based Classification**: Evaluates rules in `priority` order. Supported rule types:
    - `page_visited` — Visitor visited a URL matching a regex pattern
@@ -811,9 +826,9 @@ Profiles are structured as a prioritized list of rules (first match wins). The c
    - `keyword_match` — Any message matched a keyword or regex
    - `utm_source` — Visitor's UTM source parameter matches a value
 
-2. **LLM Fallback**: If no rule matches, uses `gpt-4o-mini` with structured output to classify based on the full conversation transcript + profile descriptions + optional LLM criteria.
+2. **LLM Fallback**: If no rule matches, uses `gpt-4o-mini` with structured output to classify based on the full conversation transcript + profile descriptions + optional LLM criteria. Skipped entirely if no tenant profile has `llm_criteria` defined.
 
-3. **Result Storage**: The classification result (`profile_id`, `profile_label`, `confidence`, `source` as `rule`/`llm`) is written to the `visitors` document with a history trail.
+3. **Result Storage**: The classification result (`profile_id`, `profile_label`, `confidence`, `source` as `rule`/`llm`, `trigger` as `auto`/`manual`) is written to the `visitors` document with a history trail via `$push` to `profile_history`.
 
 ### Dashboard UI
 
@@ -823,6 +838,14 @@ Navigate to **Visitor Profiles** in the sidebar:
 - **Rule Builder** — Type-specific inputs for each rule type (URL pattern, field key, keyword textarea, etc.)
 - **Visitor List** — Searchable/filterable grid showing all visitors with their classified profile badge
 - **Manual Operations** — Reclassify a visitor, override their profile, or edit their identity
+
+### Automatic Classification Sweep
+
+A background task in `main.py` (`start_visitor_classification_sweep`) runs every 5 minutes:
+- Queries for visitors where `last_seen_at` is older than 5 minutes and `last_classified_at` is null or precedes `last_seen_at`
+- Calls `classify_visitor(session_id, tenant_id, trigger="auto")` as fire-and-forget for each match
+- Uses `asyncio.ensure_future` — zero latency impact on chat or any other request path
+- Tradeoff: periodic sweep adds up to ~10 min delay (5 min inactivity + 5 min sweep interval) before classification fires. Simpler than hooking WebSocket disconnect and works for HTTP-only sessions.
 
 ### Profile Distribution Analytics
 
