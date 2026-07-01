@@ -66,7 +66,7 @@ class ArchivalService:
         messages = conv.get("messages", [])
         turn_count = len(messages)
 
-        if turn_count <= MAX_TURNS * 2:
+        if turn_count <= MAX_TURNS:
             return
 
         turns_to_archive = turn_count - MAX_TURNS

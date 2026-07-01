@@ -77,7 +77,7 @@ async def chat(
         max_age=31536000,
         httponly=True,
         secure=settings.COOKIE_SECURE,
-        samesite=settings.COOKIE_SAMESITE,
+        samesite=settings.COOKIE_SAMESITE,  # type: ignore[arg-type]
     )
 
     await _upsert_visitor(
@@ -264,7 +264,7 @@ async def _upsert_visitor(
     try:
         now = datetime.now(timezone.utc)
         visitor = await db.visitors.find_one(
-            {"session_id": session_id},
+            {"session_id": session_id, "tenant_id": tenant_id},
             {"ip_history": {"$slice": -1}, "page_views": {"$slice": -1}},
         )
 
@@ -278,7 +278,8 @@ async def _upsert_visitor(
             or visitor["page_views"][-1]["title"] != current_page_title
         )
 
-        update = {"$set": {"last_seen_at": now, "tenant_id": tenant_id}}
+        update: dict[str, object] = {"$set": {"last_seen_at": now, "tenant_id": tenant_id}}
+        push: dict[str, object] = {}
         if not visitor:
             update["$setOnInsert"] = {
                 "session_id": session_id,
@@ -287,16 +288,18 @@ async def _upsert_visitor(
                 "total_messages": 0,
             }
         if needs_ip:
-            update.setdefault("$push", {})["ip_history"] = {
+            push["ip_history"] = {
                 "$each": [{"ip": client_ip, "seen_at": now}],
                 "$slice": -20,
             }
         if needs_page:
-            update.setdefault("$push", {})["page_views"] = {
+            push["page_views"] = {
                 "$each": [{"url": current_url, "title": current_page_title, "timestamp": now}],
                 "$slice": -50,
             }
+        if push:
+            update["$push"] = push
 
-        await db.visitors.update_one({"session_id": session_id}, update, upsert=True)
-    except Exception:
-        pass
+        await db.visitors.update_one({"session_id": session_id, "tenant_id": tenant_id}, update, upsert=True)
+    except Exception as e:
+        print(f"[UPSERT] visitor error for session={session_id}: {e}")

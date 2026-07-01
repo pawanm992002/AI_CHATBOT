@@ -176,7 +176,11 @@ class ChatService:
         chunks = []
         top_score = 0.0
         if needs_search:
-            chunks = await search_chunks(tenant_id, search_query)
+            try:
+                chunks = await search_chunks(tenant_id, search_query)
+            except Exception as e:
+                print(f"[CHAT] search_chunks failed: {e}")
+                chunks = []
             print(f"[CHAT] search_chunks returned {len(chunks)} chunks")
             if chunks:
                 top_score = chunks[0].get("score", 0.0)
@@ -263,7 +267,7 @@ class ChatService:
         )
 
         messages.append({"role": "user", "content": turn.query})
-        system_prompt = self._build_no_match_prompt(turn, summary, messages, gap_type)
+        system_prompt = await self._build_no_match_prompt(turn, summary, messages, gap_type)
 
         forms = await _form_config_repo.get_all_enabled_for_tenant(tenant_id)
         tool_schema = self._build_form_tool(forms) if forms else None
@@ -359,7 +363,7 @@ class ChatService:
         print(f"[CHAT] No match. Gap type: {gap_type}")
 
         messages.append({"role": "user", "content": turn.query})
-        system_prompt = self._build_no_match_prompt(turn, summary, messages, gap_type)
+        system_prompt = await self._build_no_match_prompt(turn, summary, messages, gap_type)
 
         forms = await _form_config_repo.get_all_enabled_for_tenant(tenant_id)
         tool_schema = self._build_form_tool(forms) if forms else None
