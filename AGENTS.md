@@ -71,8 +71,16 @@ pyright
 uv sync
 ```
 
-### Testing Widget Locally
-Open `backend/templates/test_page.html` in a browser to test the embedded widget.
+### Testing
+```bash
+# Widget locally
+open backend/templates/test_page.html
+
+# End-to-end integration test (requires server running)
+python test_e2e.py
+```
+
+The e2e test creates a tenant, approves it, tests visitor profiles, chat, conversation archival, lead form identity sync, and visitor identity CRUD — then cleans up test data. Run against `http://127.0.0.1:8000`.
 
 ## Code Conventions
 
@@ -125,7 +133,7 @@ Open `backend/templates/test_page.html` in a browser to test the embedded widget
 | `backend/models/visitor_profile.py` | Pydantic v2 schemas for visitor profiles (create/update/response, rule discriminated unions) |
 | `backend/repositories/visitor_profile_repository.py` | CRUD for `visitor_profiles` collection |
 | `backend/controllers/visitor_profiles.py` | Dashboard JWT-authenticated routes for profiles, visitors, identity management |
-| `backend/controllers/conversations.py` | Dashboard JWT-authenticated full conversation history endpoint |
+| `backend/controllers/conversations.py` | Dashboard JWT-authenticated conversation detail + full history (merges DO Spaces archive) endpoints |
 | `packages/shared/src/types.ts` | Shared TypeScript interfaces (includes VisitorProfile, Visitor, LeadFormField with field_role)
 
 ## Database Collections

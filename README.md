@@ -1192,6 +1192,7 @@ The embeddable chat widget (`apps/widget/`) is built as a self-executing IIFE bu
 ### Conversations
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
+| GET | `/api/dashboard/conversations/{conversation_id}` | JWT | Conversation detail (messages, summary, archival status) |
 | GET | `/api/dashboard/conversations/{conversation_id}/full` | JWT | Full conversation history (merged MongoDB + DO Spaces archive) |
 
 ### System Admin
