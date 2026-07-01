@@ -1,4 +1,5 @@
 import json
+import asyncio
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 
@@ -8,6 +9,9 @@ from core.auth import db
 from core.config import settings
 
 MAX_TURNS = 20
+
+
+_pending: set[str] = set()
 
 
 def _get_client():
@@ -51,10 +55,16 @@ class ArchivalService:
         MAX_TURNS = 20 means 20 conversation turns = 40 individual messages.
         Compaction (summary builder) runs first; archival is the sole array trimmer.
         """
+        key = f"{tenant_id}:{conversation_id}"
+        if key in _pending:
+            return  # Archival already in progress — skip
+        _pending.add(key)
         try:
             await self._archive_overflow_inner(conversation_id, tenant_id)
         except Exception as e:
             print(f"[ARCHIVAL] Error archiving conversation {conversation_id}: {e}")
+        finally:
+            _pending.discard(key)
 
     async def _archive_overflow_inner(
         self, conversation_id: str, tenant_id: str

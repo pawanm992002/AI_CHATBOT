@@ -8,8 +8,14 @@ import asyncio
 import httpx
 import os
 import re
+import socket
 import sys
 import uuid
+
+orig_getaddrinfo = socket.getaddrinfo
+def getaddrinfo_ipv4(host, port, family=0, type=0, proto=0, flags=0):
+    return orig_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
+socket.getaddrinfo = getaddrinfo_ipv4
 
 BASE = "http://127.0.0.1:8000"
 TEST_PREFIX = f"_test_e2e_{uuid.uuid4().hex[:8]}"

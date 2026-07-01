@@ -134,16 +134,16 @@ class ChatService:
         business_name = turn.tenant.get("business_name") or turn.tenant["domain"]
         provider, model = self._tenant_llm_provider_model(turn.tenant)
 
-        summary, messages = await self._load_conversation_context(turn.session_id)
+        summary, messages = await self._load_conversation_context(turn.session_id, tenant_id)
         classification = await self._classify_query(turn.query, summary, messages, provider, model)
 
         if classification == QueryClass.GREETING:
-            visitor_name = await self._get_visitor_name(turn.session_id)
+            visitor_name = await self._get_visitor_name(turn.session_id, tenant_id)
             if visitor_name:
                 answer = f"Hi {visitor_name}, welcome back to {business_name}! How can I help you today?"
             else:
                 answer = f"Hello! Welcome to {business_name}. How can I help you today?"
-            await self._track_visitor_message(turn.session_id)
+            await self._track_visitor_message(turn.session_id, turn.tenant["tenant_id"])
             return ChatTurnResult(message_id=turn.message_id, answer=answer, sources=[])
 
         if classification == QueryClass.OUT_OF_SCOPE:
@@ -155,7 +155,7 @@ class ChatService:
             messages.append({"role": "assistant", "content": answer, "usage": usage})
             summary, messages = await self._compact_if_needed(summary, messages, provider, model)
             await self._persist_conversation(turn, summary, messages)
-            await self._track_visitor_message(turn.session_id)
+            await self._track_visitor_message(turn.session_id, turn.tenant["tenant_id"])
             if not show_form:
                 await self._log_knowledge_gap(tenant_id, turn.query, turn.current_url, "out_of_scope", turn.message_id)
             return ChatTurnResult(message_id=turn.message_id, answer=answer, sources=[], show_enquiry_form=show_form, enquiry_form_id=form_id)
@@ -205,16 +205,16 @@ class ChatService:
         business_name = turn.tenant.get("business_name") or turn.tenant["domain"]
         provider, model = self._tenant_llm_provider_model(turn.tenant)
 
-        summary, messages = await self._load_conversation_context(turn.session_id)
+        summary, messages = await self._load_conversation_context(turn.session_id, tenant_id)
         classification = await self._classify_query(turn.query, summary, messages, provider, model)
 
         if classification == QueryClass.GREETING:
-            visitor_name = await self._get_visitor_name(turn.session_id)
+            visitor_name = await self._get_visitor_name(turn.session_id, tenant_id)
             if visitor_name:
                 answer = f"Hi {visitor_name}, welcome back to {business_name}! How can I help you today?"
             else:
                 answer = f"Hello! Welcome to {business_name}. How can I help you today?"
-            await self._track_visitor_message(turn.session_id)
+            await self._track_visitor_message(turn.session_id, turn.tenant["tenant_id"])
             return ChatTurnResult(message_id=turn.message_id, answer=answer, sources=[])
 
         if classification == QueryClass.OUT_OF_SCOPE:
@@ -226,7 +226,7 @@ class ChatService:
             messages.append({"role": "assistant", "content": answer, "usage": usage})
             summary, messages = await self._compact_if_needed(summary, messages, provider, model)
             await self._persist_conversation(turn, summary, messages)
-            await self._track_visitor_message(turn.session_id)
+            await self._track_visitor_message(turn.session_id, turn.tenant["tenant_id"])
             if not show_form:
                 await self._log_knowledge_gap(tenant_id, turn.query, turn.current_url, "out_of_scope", turn.message_id)
             return ChatTurnResult(message_id=turn.message_id, answer=answer, sources=[], show_enquiry_form=show_form, enquiry_form_id=form_id)
@@ -289,7 +289,7 @@ class ChatService:
         messages.append({"role": "assistant", "content": full_answer, "usage": usage})
         summary, messages = await self._compact_if_needed(summary, messages, tenant_ai_provider, tenant_ai_model)
         await self._persist_conversation(turn, summary, messages)
-        await self._track_visitor_message(turn.session_id)
+        await self._track_visitor_message(turn.session_id, turn.tenant["tenant_id"])
         if not show_form:
             await self._log_knowledge_gap(tenant_id, turn.query, turn.current_url, gap_type, turn.message_id)
 
@@ -297,6 +297,7 @@ class ChatService:
 
     async def _handle_answer_with_chunks_stream(self, turn, summary, messages, chunks, needs_search, on_token):
         """Streaming version of _handle_answer_with_chunks."""
+        tenant_id = turn.tenant["tenant_id"]
         business_name = turn.tenant.get("business_name") or turn.tenant["domain"]
         sources = self._build_sources(chunks)
 
@@ -313,7 +314,7 @@ class ChatService:
                 business_name=business_name,
             )
 
-        identity_ctx = await self._get_visitor_identity_context(turn.session_id)
+        identity_ctx = await self._get_visitor_identity_context(turn.session_id, tenant_id)
         if identity_ctx:
             system_prompt += identity_ctx
 
@@ -343,7 +344,7 @@ class ChatService:
         messages.append({"role": "assistant", "content": full_answer, "usage": usage})
         summary, messages = await self._compact_if_needed(summary, messages, tenant_ai_provider, tenant_ai_model)
         await self._persist_conversation(turn, summary, messages)
-        await self._track_visitor_message(turn.session_id)
+        await self._track_visitor_message(turn.session_id, turn.tenant["tenant_id"])
 
         return ChatTurnResult(message_id=turn.message_id, answer=full_answer, sources=sources, show_enquiry_form=show_form, enquiry_form_id=form_id)
 
@@ -373,7 +374,7 @@ class ChatService:
 
         summary, messages = await self._compact_if_needed(summary, messages, tenant_ai_provider, tenant_ai_model)
         await self._persist_conversation(turn, summary, messages)
-        await self._track_visitor_message(turn.session_id)
+        await self._track_visitor_message(turn.session_id, turn.tenant["tenant_id"])
         if not show_form:
             await self._log_knowledge_gap(tenant_id, turn.query, turn.current_url, gap_type, turn.message_id)
 
@@ -387,6 +388,7 @@ class ChatService:
         chunks: list[dict],
         needs_search: bool,
     ) -> ChatTurnResult:
+        tenant_id = turn.tenant["tenant_id"]
         business_name = turn.tenant.get("business_name") or turn.tenant["domain"]
         sources = self._build_sources(chunks)
 
@@ -403,7 +405,7 @@ class ChatService:
                 business_name=business_name,
             )
 
-        identity_ctx = await self._get_visitor_identity_context(turn.session_id)
+        identity_ctx = await self._get_visitor_identity_context(turn.session_id, tenant_id)
         if identity_ctx:
             system_prompt += identity_ctx
 
@@ -421,7 +423,7 @@ class ChatService:
 
         summary, messages = await self._compact_if_needed(summary, messages, tenant_ai_provider, tenant_ai_model)
         await self._persist_conversation(turn, summary, messages)
-        await self._track_visitor_message(turn.session_id)
+        await self._track_visitor_message(turn.session_id, turn.tenant["tenant_id"])
 
         return ChatTurnResult(message_id=turn.message_id, answer=answer, sources=sources, show_enquiry_form=show_form, enquiry_form_id=form_id)
 
@@ -640,7 +642,7 @@ class ChatService:
 
         yield {"answer": full_answer, "show_form": show_form, "form_id": form_id, "usage": usage}
 
-    async def _load_conversation_context(self, session_id: str) -> tuple[str, list[dict]]:
+    async def _load_conversation_context(self, session_id: str, tenant_id: str) -> tuple[str, list[dict]]:
         cache_key = get_redis_key(f"chat_session:{session_id}")
         try:
             cached_data_str = await redis_client.get(cache_key)
@@ -650,7 +652,7 @@ class ChatService:
         except Exception as e:
             print(f"Redis get failed: {e}")
 
-        session = await db.conversations.find_one({"session_id": session_id})
+        session = await db.conversations.find_one({"session_id": session_id, "tenant_id": tenant_id})
         if not session:
             return "", []
 
@@ -666,7 +668,7 @@ class ChatService:
         cache_key = get_redis_key(f"chat_session:{turn.session_id}")
         now = datetime.now(timezone.utc)
         await db.conversations.update_one(
-            {"session_id": turn.session_id},
+            {"session_id": turn.session_id, "tenant_id": turn.tenant["tenant_id"]},
             {"$set": {
                 "tenant_id": turn.tenant["tenant_id"],
                 "current_url": turn.current_url,
@@ -690,9 +692,9 @@ class ChatService:
             archival_service.archive_overflow_turns(turn.session_id, turn.tenant["tenant_id"])
         )
 
-    async def _track_visitor_message(self, session_id: str) -> None:
+    async def _track_visitor_message(self, session_id: str, tenant_id: str) -> None:
         await db.visitors.update_one(
-            {"visitor_id": session_id},
+            {"visitor_id": session_id, "tenant_id": tenant_id},
             {"$addToSet": {"conversation_ids": session_id}, "$inc": {"total_messages": 1}},
         )
 
@@ -700,11 +702,11 @@ class ChatService:
         if len(messages) < 32:
             return summary, messages
 
-        # Summarize oldest messages; archival is the sole array trimmer
-        if len(messages) > 40:
-            messages_to_summarize = messages[:-40]
+        # Summarize oldest messages beyond the archival cap; archival is the sole array trimmer
+        if len(messages) > 42:
+            messages_to_summarize = messages[:-42]
             summary = await self._summarize_past_context(summary, messages_to_summarize, provider, model)
-        return summary, messages  # Don't trim — archival manages the live array cap
+        return summary, messages
 
     async def _summarize_past_context(self, previous_summary: str, messages_to_summarize: list[dict], provider: str = "openai", model: str = "gpt-4o-mini") -> str:
         formatted_history = "\n".join([
@@ -849,10 +851,10 @@ class ChatService:
             heading = f"{heading} - {title}"
         return f"{heading}:\n{chunk['text']}"
 
-    async def _get_visitor_name(self, session_id: str) -> str | None:
+    async def _get_visitor_name(self, session_id: str, tenant_id: str) -> str | None:
         try:
             visitor = await db.visitors.find_one(
-                {"visitor_id": session_id},
+                {"visitor_id": session_id, "tenant_id": tenant_id},
                 {"identity.name": 1}
             )
             if visitor:
@@ -864,8 +866,8 @@ class ChatService:
             pass
         return None
 
-    async def _get_visitor_identity_context(self, session_id: str) -> str:
-        name = await self._get_visitor_name(session_id)
+    async def _get_visitor_identity_context(self, session_id: str, tenant_id: str) -> str:
+        name = await self._get_visitor_name(session_id, tenant_id)
         if name:
             return f"\nThe visitor's name is {name}. Naturally use their name in conversation when appropriate."
         return ""
