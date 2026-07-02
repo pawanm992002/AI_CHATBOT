@@ -33,7 +33,7 @@ sequenceDiagram
     participant GPT as gpt-4o
 
     User->>Widget: Types a message
-    Widget->>API: POST /chat { query, session_id, api_key }
+    Widget->>API: POST /chat { query, session_id, visitor_id, api_key }
     
     Step 1: Regex Greeting Check
     API->>Regex: Check if greeting (hi, hello, etc.)
@@ -531,7 +531,7 @@ Each AI response includes thumbs-up/thumbs-down buttons for visitor feedback. Th
 ### How It Works
 1. Every chat response includes a unique `message_id`
 2. Visitor clicks thumbs-up or thumbs-down on any bot message
-3. Feedback is stored in the `message_feedback` collection
+3. Feedback is stored in the `message_feedback` collection, attributed to the persistent `visitor_id`
 4. Dashboard shows feedback analytics (total likes, dislikes, like ratio)
 
 ### API Endpoint
@@ -543,6 +543,7 @@ Content-Type: application/json
 {
   "message_id": "uuid",
   "session_id": "uuid",
+  "visitor_id": "uuid",
   "rating": "like" | "dislike"
 }
 ```
@@ -805,7 +806,7 @@ Tenants can define profiles (e.g. "Student", "Teacher", "Parent") with a name, d
 1. **Profile definition**: Tenant creates profiles via **Visitor Profiles** in the dashboard — each has a `name`, `description` (used for classification criteria), optional `response_instructions` (injected into the system prompt), and a color badge.
 2. **Real-time classification**: On a visitor's first non-greeting message, the query-rewrite LLM call also returns a profile match (or NONE). The result is written inline — no separate LLM call, no added latency.
 3. **Behavior change**: If matched, the profile's `response_instructions` are injected into the system prompt for all subsequent messages, changing how the AI answers and prioritizes information.
-4. **One-shot**: Classification happens once per visitor (`profile_classification_attempted` flag). No reclassification, no background sweep, no extra cost.
+4. **Persistent across sessions**: Classification is one-time per visitor (`profile_classification_attempted` flag written to the `visitors` document keyed by `visitor_id`). Because `visitor_id` persists across sessions via `localStorage`, the profile is retained even when a visitor starts a New Chat — the AI personalises from the very first message of any new session with no extra LLM cost.
 
 ### Dashboard
 Navigate to **Visitor Profiles** in the sidebar to manage profiles — create, edit, toggle enabled, or delete. Each profile's response instructions tell the AI how to tailor its answers for that visitor type.
@@ -823,6 +824,21 @@ The per-IP and per-session limits catch individual bad actors. The per-tenant li
 
 All rate limiters use Redis sorted sets with TTL-based expiry for automatic cleanup. Implementation in `backend/core/rate_limiter.py`.
 
+## Persistent Visitor Identity & Session Management
+
+The platform tracks every visitor across multiple chat sessions using two separate identifiers stored in the browser:
+
+| Key | Storage | Lifetime | Purpose |
+|---|---|---|---|
+| `cw_visitor_id` | `localStorage` | Permanent (until cleared) | Long-lived identity linking all sessions to one visitor |
+| `cw_session_id` | `sessionStorage` | Tab lifetime / New Chat click | Scope of a single conversation |
+
+### New Chat Button
+A **"+"** button in the widget header allows visitors to start a fresh conversation. This calls `resetSessionId()` which generates a new `session_id` and clears the current message list. The persistent `visitor_id` is **never reset** — the visitor's identity, profile classification, and known name are all preserved immediately in the next session.
+
+### Identity Propagation
+Every API call (WebSocket messages, lead form submissions, feedback ratings) sends both `session_id` (current conversation scope) and `visitor_id` (long-lived identity). The backend upserts the `visitors` document using `visitor_id` as the primary key and maintains a `conversation_ids` array of all session IDs that belong to this visitor.
+
 ## Session Management & History Compaction
 
 To ensure high-performance, cost-effective conversational capability, the system integrates Redis caching alongside MongoDB storage, combined with a rolling history summarization pipeline.
@@ -838,13 +854,16 @@ To ensure high-performance, cost-effective conversational capability, the system
 - **Trimming**: After summarizing, the live array is trimmed to 30 messages, keeping the most recent context in full fidelity.
 - **System Prompt Injection**: The rolling summary is automatically injected into the LLM system prompt on subsequent turns.
 
-### 3. Cold Storage Archival (DO Spaces)
-- **Trigger**: Safety net — when a turn is persisted and the `messages` array exceeds 60 items (30 conversation turns × 2). In normal operation compaction keeps the array at ≤30, so archival only fires if compaction was skipped or failed.
-- **Archival**: Oldest messages beyond the most recent 60 are serialized as JSONL, written to DigitalOcean Spaces under `conversations/{tenant_id}/{session_id}/archive_{part:04d}.jsonl` using rolling numbered parts, then trimmed from MongoDB.
-- **Live Data**: Under normal operation, MongoDB never holds more than 30 messages per conversation (compaction-trimmed). Archival caps it at 60 in edge cases.
-- **Full History Retrieval**: `GET /api/dashboard/conversations/{id}/full` iterates archive parts from DO Spaces and merges with live messages in chronological order.
-- **Concurrency Safety**: An in-memory `_pending` set ensures at most one archival task runs per conversation at a time — duplicate archival requests from rapid concurrent POSTs are skipped (not queued).
-- **Implementation**: `backend/services/archival_service.py` — fire-and-forget via `asyncio.ensure_future` to avoid adding latency to chat responses.
+### 3. Cold Storage Archival (DO Spaces) — Two Triggers
+
+**Trigger 1 — Session completion (primary)**: When a visitor starts a new session (detected in `_upsert_visitor` when `session_id` is not in the visitor's existing `conversation_ids`), all prior completed sessions are archived in a background `asyncio` task. All messages are serialized as JSONL and uploaded to DO Spaces, then the `messages` array in MongoDB is cleared entirely. This keeps MongoDB lean for visitors who frequently start new chats.
+
+**Trigger 2 — Over-limit safety net (secondary)**: If a single session exceeds 60 messages (30 turns × 2) without the visitor ever starting a new session, the oldest messages beyond the most recent 60 are archived to DO Spaces and trimmed from MongoDB. This ensures no single conversation document can grow unboundedly.
+
+- **DO Spaces path**: `conversations/{tenant_id}/{session_id}/archive_{part:04d}.jsonl` (rolling numbered parts — immutable once sealed, cheap per-write).
+- **Full History Retrieval**: `GET /api/dashboard/conversations/{id}/full` iterates all archive parts from DO Spaces and merges with live messages in chronological order.
+- **Concurrency Safety**: An in-memory `_pending` set ensures at most one archival task runs per conversation at a time.
+- **Implementation**: `backend/services/archival_service.py` — `archive_overflow_turns()` for Trigger 2, `archive_entire_session()` for Trigger 1.
 
 ## Key Design Decisions
 

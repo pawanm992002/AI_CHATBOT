@@ -131,6 +131,78 @@ class ArchivalService:
             f"to {key}. Total archived: {new_archived_count}"
         )
 
+    async def archive_entire_session(self, conversation_id: str, tenant_id: str) -> None:
+        """
+        Archive all messages of a session/conversation to DO Spaces,
+        setting messages to [] in MongoDB to free up hot database space.
+        """
+        key = f"{tenant_id}:{conversation_id}"
+        if key in _pending:
+            return
+        _pending.add(key)
+        try:
+            conv = await db.conversations.find_one(
+                {"session_id": conversation_id, "tenant_id": tenant_id}
+            )
+            if not conv:
+                return
+            messages = conv.get("messages", [])
+            if not messages:
+                return
+
+            archived_previously = conv.get("archived_turn_count", 0)
+            archive_part = archived_previously // (MAX_TURNS * 2) + 1
+
+            lines = []
+            for i in range(0, len(messages), 2):
+                if i + 1 < len(messages):
+                    turn = {
+                        "user": messages[i].get("content", ""),
+                        "assistant": messages[i + 1].get("content", ""),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                    lines.append(json.dumps(turn))
+                elif i < len(messages):
+                    turn = {
+                        "user": messages[i].get("content", ""),
+                        "assistant": "",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                    lines.append(json.dumps(turn))
+
+            if not lines:
+                return
+
+            key_path = _archive_key(tenant_id, conversation_id, archive_part)
+            client = _get_client()
+            body = "\n".join(lines) + "\n"
+
+            client.put_object(
+                Bucket=settings.DO_SPACES_BUCKET,
+                Key=key_path,
+                Body=body.encode("utf-8"),
+                ContentType="application/jsonl",
+            )
+
+            new_archived_count = archived_previously + len(messages)
+
+            await db.conversations.update_one(
+                {"session_id": conversation_id, "tenant_id": tenant_id},
+                {
+                    "$set": {
+                        "messages": [],
+                        "archived": True,
+                        "archived_turn_count": new_archived_count,
+                        "updated_at": datetime.now(timezone.utc),
+                    }
+                },
+            )
+            print(f"[ARCHIVAL] Entire session {conversation_id} archived. Total turns: {new_archived_count}")
+        except Exception as e:
+            print(f"[ARCHIVAL] Error archiving entire session {conversation_id}: {e}")
+        finally:
+            _pending.discard(key)
+
     async def get_full_conversation(
         self, conversation_id: str, tenant_id: str
     ) -> Optional[Dict[str, Any]]:

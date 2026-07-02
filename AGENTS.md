@@ -91,12 +91,17 @@ The e2e test creates a tenant, approves it, tests visitor profiles, chat, conver
 - Auth: JWT in HttpOnly cookies for tenants, API key (Bearer) for widget
 - Rate limiting: 3 layers — per-IP, per-tenant, per-session (Redis sorted sets, sliding window)
 - Schema validation enforced on startup via JSON Schema in `core/schema_validator.py`
-- Profile classification happens inline via the query rewrite LLM call (zero added latency) — no background sweep
+- Profile classification happens inline via the query rewrite LLM call (zero added latency) — no background sweep, persistent at the visitor level across all sessions
 - All visitor/conversation queries must include `tenant_id` alongside `visitor_id` or `session_id` for multi-tenant isolation
+- Archival Triggers:
+  1) **Over-limit active turn compression**: moves oldest turns to DO Spaces if a single session exceeds 60 messages.
+  2) **Session completion trigger**: fully archives previous sessions to DO Spaces in the background when a visitor initializes a new chat session.
 
 ### Frontend (TypeScript/React)
 - Dashboard: SPA with react-router-dom, private/admin routes, TailwindCSS dark theme (slate-950)
 - Widget: IIFE self-executing bundle, auto-initializes from `data-api-key` attribute
+- Session management: uses `sessionStorage` for tab-bound `session_id` and `localStorage` for cross-session `visitor_id` persistence
+- Widget UI: includes a "+" (New Chat) button in the header to reset the current session and clear message history while preserving the visitor's long-lived identity
 - Shared types and hooks via `@chatbot/shared` workspace package
 - Widget auth via `Authorization: Bearer <api_key>` header; WebSocket uses SHA-256 hashed key as query param
 

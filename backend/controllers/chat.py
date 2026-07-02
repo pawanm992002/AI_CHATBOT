@@ -262,6 +262,15 @@ async def websocket_chat(websocket: WebSocket, key_hash: str = Query(...)):
             pass
 
 
+async def _archive_old_sessions_bg(old_session_ids: list[str], tenant_id: str) -> None:
+    try:
+        from services.archival_service import archival_service
+        for s_id in old_session_ids:
+            await archival_service.archive_entire_session(s_id, tenant_id)
+    except Exception as e:
+        print(f"[ARCHIVAL] Background archival of old sessions failed: {e}")
+
+
 async def _upsert_visitor(
     session_id: str,
     tenant_id: str,
@@ -277,6 +286,13 @@ async def _upsert_visitor(
             {"visitor_id": key, "tenant_id": tenant_id},
             {"ip_history": {"$slice": -1}, "page_views": {"$slice": -1}},
         )
+
+        if visitor and visitor.get("conversation_ids"):
+            if session_id not in visitor["conversation_ids"]:
+                old_ids = [c for c in visitor["conversation_ids"] if c != session_id]
+                if old_ids:
+                    import asyncio
+                    asyncio.create_task(_archive_old_sessions_bg(old_ids, tenant_id))
 
         needs_ip = bool(client_ip) and (
             not visitor or not visitor.get("ip_history") or visitor["ip_history"][-1]["ip"] != client_ip
