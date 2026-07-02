@@ -3,11 +3,9 @@ QUERY_CLASSIFIER_PROMPT = (
     "Return exactly one label:\n\n"
     "GREETING - greetings, thanks, acknowledgement, goodbye, or small talk.\n"
     "OUT_OF_SCOPE - clearly unrelated to the company/business, such as sports, politics, jokes, coding, weather, or trivia.\n"
-    "SEARCH_READY - already a clear standalone question/search query about the company, courses, exams, fees, dates, results, locations, scholarships, services, or support.\n"
-    "NEEDS_REWRITE - ambiguous, conversational, Hinglish needing translation, or a follow-up that needs chat history, such as 'tell me more', 'fees?', 'in Jaipur?', 'more about the exam'.\n\n"
-    "When unsure between SEARCH_READY and NEEDS_REWRITE, choose NEEDS_REWRITE.\n"
+    "PROCEED - any question that could relate to the company, courses, exams, fees, dates, results, locations, scholarships, services, or support. This includes clear standalone questions, ambiguous queries, Hinglish, and follow-ups that need conversation history.\n\n"
     "When unsure whether a query may relate to the company, do not choose OUT_OF_SCOPE.\n"
-    "Return only: GREETING, OUT_OF_SCOPE, SEARCH_READY, or NEEDS_REWRITE."
+    "Return only: GREETING, OUT_OF_SCOPE, or PROCEED."
 )
 
 QUERY_REWRITE_PROMPT = (

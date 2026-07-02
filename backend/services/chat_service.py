@@ -38,8 +38,7 @@ _form_config_repo = LeadFormConfigRepository()
 class QueryClass(StrEnum):
     GREETING = "GREETING"
     OUT_OF_SCOPE = "OUT_OF_SCOPE"
-    SEARCH_READY = "SEARCH_READY"
-    NEEDS_REWRITE = "NEEDS_REWRITE"
+    PROCEED = "PROCEED"
 
 
 @dataclass
@@ -65,13 +64,6 @@ _GREETING_PATTERN = re.compile(
     r'^(hi|hello|hey|yo|howdy|hola|namaste|namaskar|good\s*(morning|afternoon|evening|night)|'
     r'what\'?s?\s*up|sup|how\s*are\s*you|hru|gm|gn|bye|thanks|thank\s*you|ok|okay|'
     r'chalo|acha|theek\s*hai|haan|ji|sir|madam|boss|dost)\s*[!.?]*$',
-    re.IGNORECASE,
-)
-
-_CONTEXTUAL_FOLLOWUP_PATTERN = re.compile(
-    r"^\s*(tell\s+me\s+more|more|more\s+about\s+(it|this|that|the\s+exam)|"
-    r"details?|explain|what\s+else|eligibility|fees?|date|exam\s+date|"
-    r"syllabus|registration|apply|how\s+to\s+apply|where|when|in\s+.+)\s*[?.!]*\s*$",
     re.IGNORECASE,
 )
 
@@ -184,14 +176,10 @@ class ChatService:
         except Exception:
             profiles = None
 
-        if self._is_contextual_followup(turn.query) and (summary or messages):
-            search_query = self._build_contextual_search_query(turn.query, summary, messages)
-        elif classification == QueryClass.NEEDS_REWRITE:
-            search_query, profile_name = await self._rewrite_search_query(turn.query, summary, messages, provider, model, profiles=profiles)
-        elif classification == QueryClass.SEARCH_READY:
-            search_query = turn.query
-        else:
-            needs_search = False
+        # Every non-greeting, non-out-of-scope message goes through the LLM
+        # rewrite step, which resolves entities/pronouns/follow-ups from
+        # conversation history into the search query.
+        search_query, profile_name = await self._rewrite_search_query(turn.query, summary, messages, provider, model, profiles=profiles)
 
         # If profile was identified, classify the visitor
         if profile_name and profiles:
@@ -277,14 +265,10 @@ class ChatService:
         except Exception:
             profiles = None
 
-        if self._is_contextual_followup(turn.query) and (summary or messages):
-            search_query = self._build_contextual_search_query(turn.query, summary, messages)
-        elif classification == QueryClass.NEEDS_REWRITE:
-            search_query, profile_name = await self._rewrite_search_query(turn.query, summary, messages, provider, model, profiles=profiles)
-        elif classification == QueryClass.SEARCH_READY:
-            search_query = turn.query
-        else:
-            needs_search = False
+        # Every non-greeting, non-out-of-scope message goes through the LLM
+        # rewrite step, which resolves entities/pronouns/follow-ups from
+        # conversation history into the search query.
+        search_query, profile_name = await self._rewrite_search_query(turn.query, summary, messages, provider, model, profiles=profiles)
 
         # If profile was identified, classify the visitor
         if profile_name and profiles:
@@ -490,10 +474,6 @@ class ChatService:
         q = query.strip()
         if self._is_greeting(q):
             return QueryClass.GREETING
-        if self._is_contextual_followup(q) and (summary or messages):
-            return QueryClass.NEEDS_REWRITE
-        if _DEVANAGARI_PATTERN.search(q):
-            return QueryClass.NEEDS_REWRITE
 
         conversation_text = self._recent_conversation_text(summary, messages)
         user_prompt = q
@@ -509,9 +489,9 @@ class ChatService:
                 ]
             )
             label = (resp.content or "").strip().upper()
-            return QueryClass(label) if label in QueryClass.__members__ else QueryClass.NEEDS_REWRITE
+            return QueryClass(label) if label in QueryClass.__members__ else QueryClass.PROCEED
         except Exception:
-            return QueryClass.SEARCH_READY
+            return QueryClass.PROCEED
 
     async def _rewrite_search_query(self, query: str, summary: str, messages: list[dict], provider: str = "openai", model: str = "gpt-4o-mini", profiles: list[dict] | None = None) -> tuple[str, str | None]:
         conversation_text = self._recent_conversation_text(summary, messages)
@@ -544,7 +524,7 @@ class ChatService:
     async def _build_no_match_prompt(self, turn: ChatTurnInput, summary: str, messages: list[dict], gap_type: str) -> str:
         business_name = turn.tenant.get("business_name") or turn.tenant["domain"]
 
-        if self._is_contextual_followup(turn.query) and (summary or messages):
+        if summary or messages:
             conversation_text = self._recent_conversation_text(summary, messages, max_messages=30)
             return prompts.FOLLOWUP_NO_MATCH_PROMPT.format(
                 business_name=business_name,
@@ -862,18 +842,6 @@ class ChatService:
         except Exception as e:
             print(f"[KNOWLEDGE] Error logging gap: {e}")
 
-    def _build_contextual_search_query(self, query: str, summary: str, messages: list[dict]) -> str:
-        conversation_text = self._recent_conversation_text(summary, messages, max_messages=6)
-        max_context_chars = 1200
-        if len(conversation_text) > max_context_chars:
-            conversation_text = conversation_text[-max_context_chars:]
-
-        return (
-            f"Latest user follow-up: {query.strip()}\n"
-            "Use the recent conversation to resolve what the follow-up refers to:\n"
-            f"{conversation_text}"
-        )
-
     def _recent_conversation_text(self, summary: str, messages: list[dict], max_messages: int = MAX_REWRITE_HISTORY) -> str:
         parts = []
         if summary:
@@ -940,6 +908,3 @@ class ChatService:
 
     def _is_greeting(self, query: str) -> bool:
         return bool(_GREETING_PATTERN.match(query.strip()))
-
-    def _is_contextual_followup(self, query: str) -> bool:
-        return bool(_CONTEXTUAL_FOLLOWUP_PATTERN.match(query.strip()))
