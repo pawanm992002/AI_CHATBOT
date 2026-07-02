@@ -787,7 +787,7 @@ When a lead form is submitted, if any field has a `field_role` of `name`, `email
 2. **Identity Upsert**: On lead submission, the backend resolves the `field_role` from the form config and upserts the visitor's identity (`name`, `email`, `phone`, `source_lead_id`) into the `visitors` document.
 3. **Personalized Greeting**: On subsequent visits, the chat greeting becomes `"Hi {name}, welcome back to {domain}..."` when a known identity exists.
 4. **Identity Context**: The visitor's name is injected into the LLM system prompt for context-aware conversations.
-5. **Manual Override**: Dashboard admins can edit or clear a visitor's identity via the **Visitor Profiles** page.
+5. **Manual Override**: Dashboard admins can edit or clear a visitor's identity via the Visitor Profiles page.
 
 ### Guardrails
 
@@ -799,56 +799,16 @@ The chatbot avoids answering irrelevant questions through vector search scoring:
 
 ## Visitor Profiles
 
-Tenants can define visitor profiles with classification rules to segment their visitors (e.g., "Free Tier User", "Enterprise Prospect", "Support Seeker") for analytics and targeted conversations.
+Tenants can define profiles (e.g. "Student", "Teacher", "Parent") with a name, description, and optional response instructions. The AI classifies visitors in real-time on their first substantive message — with zero added latency — by piggybacking on the existing query-rewrite LLM call.
 
-Classification signals (messages, page views, lead form data, conversation history) are pulled from **all** of a visitor's sessions, not just the current one.
+### How it works
+1. **Profile definition**: Tenant creates profiles via **Visitor Profiles** in the dashboard — each has a `name`, `description` (used for classification criteria), optional `response_instructions` (injected into the system prompt), and a color badge.
+2. **Real-time classification**: On a visitor's first non-greeting message, the query-rewrite LLM call also returns a profile match (or NONE). The result is written inline — no separate LLM call, no added latency.
+3. **Behavior change**: If matched, the profile's `response_instructions` are injected into the system prompt for all subsequent messages, changing how the AI answers and prioritizes information.
+4. **One-shot**: Classification happens once per visitor (`profile_classification_attempted` flag). No reclassification, no background sweep, no extra cost.
 
-### Triggers
-
-Classification runs in two ways:
-
-| Trigger | When | How |
-|---------|------|-----|
-| **Manual** | Dashboard "Reclassify" button or `POST /api/dashboard/visitors/{visitor_id}/reclassify` | On-demand — admin or API caller decides when |
-| **Automatic** | Periodic sweep every 5 minutes | Finds visitors inactive for 5+ min who haven't been classified since last activity |
-
-Both use the same `classify_visitor()` pipeline. Each `profile_history` entry records a `trigger` field (`"auto"` or `"manual"`) to distinguish the source.
-
-### Classification Pipeline
-
-Profiles are structured as a prioritized list of rules (first match wins). Classification runs as a **fire-and-forget background task** (never blocks chat):
-
-1. **Rule-Based Classification**: Evaluates rules in `priority` order. Supported rule types:
-   - `page_visited` — Visitor visited a URL matching a regex pattern
-   - `lead_form_field` — A lead form field contains a matching value
-   - `message_count_gte` — Visitor has sent at least N messages
-   - `keyword_match` — Any message matched a keyword or regex
-   - `utm_source` — Visitor's UTM source parameter matches a value
-
-2. **LLM Fallback**: If no rule matches, uses `gpt-4o-mini` with structured output to classify based on the full conversation transcript + profile descriptions + optional LLM criteria. Skipped entirely if no tenant profile has `llm_criteria` defined.
-
-3. **Result Storage**: The classification result (`profile_id`, `profile_label`, `confidence`, `source` as `rule`/`llm`, `trigger` as `auto`/`manual`) is written to the `visitors` document with a history trail via `$push` to `profile_history`.
-
-### Dashboard UI
-
-Navigate to **Visitor Profiles** in the sidebar:
-- **Profile List** — Sidebar with all profiles, each showing a colored badge and enabled toggle
-- **Profile Editor** — Detail view with name, color picker, description, rule builder, LLM criteria textarea
-- **Rule Builder** — Type-specific inputs for each rule type (URL pattern, field key, keyword textarea, etc.)
-- **Visitor List** — Searchable/filterable grid showing all visitors with their classified profile badge
-- **Manual Operations** — Reclassify a visitor, override their profile, or edit their identity
-
-### Automatic Classification Sweep
-
-A background task in `main.py` (`start_visitor_classification_sweep`) runs every 5 minutes:
-- Queries for visitors where `last_seen_at` is older than 5 minutes and `last_classified_at` is null or precedes `last_seen_at`
-- Calls `classify_visitor(visitor_id, tenant_id, trigger="auto")` as fire-and-forget for each match
-- Uses `asyncio.ensure_future` — zero latency impact on chat or any other request path
-- Tradeoff: periodic sweep adds up to ~10 min delay (5 min inactivity + 5 min sweep interval) before classification fires. Simpler than hooking WebSocket disconnect and works for HTTP-only sessions.
-
-### Profile Distribution Analytics
-
-The **Tenant Analytics** page includes a profile distribution bar chart showing the count and percentage of visitors in each profile, including an "Unclassified" row for visitors with no matched profile.
+### Dashboard
+Navigate to **Visitor Profiles** in the sidebar to manage profiles — create, edit, toggle enabled, or delete. Each profile's response instructions tell the AI how to tailor its answers for that visitor type.
 
 Three layers of rate limiting protect the chat endpoint:
 
@@ -1199,17 +1159,13 @@ The embeddable chat widget (`apps/widget/`) is built as a self-executing IIFE bu
 ### Visitor Profiles
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
-| GET | `/api/dashboard/visitor-profiles` | JWT | List tenant's visitor profiles |
-| POST | `/api/dashboard/visitor-profiles` | JWT | Create a visitor profile |
-| PUT | `/api/dashboard/visitor-profiles/{profile_id}` | JWT | Update a visitor profile |
-| DELETE | `/api/dashboard/visitor-profiles/{profile_id}` | JWT | Delete a visitor profile |
-| GET | `/api/dashboard/visitor-profiles/stats` | JWT | Profile distribution stats (counts per profile) |
-| GET | `/api/dashboard/visitors` | JWT | List visitors (filterable by `profile_id`, search by name/email) |
-| GET | `/api/dashboard/visitors/{visitor_id}` | JWT | Visitor detail with identity and linked leads |
-| POST | `/api/dashboard/visitors/{visitor_id}/reclassify` | JWT | Manually trigger reclassification |
-| PUT | `/api/dashboard/visitors/{visitor_id}/profile` | JWT | Manually override a visitor's profile |
-| PUT | `/api/dashboard/visitors/{visitor_id}/identity` | JWT | Manually edit visitor's stored identity |
-| DELETE | `/api/dashboard/visitors/{visitor_id}/identity` | JWT | Clear visitor's stored identity fields |
+| GET | `/api/dashboard/visitor-profiles` | JWT | List tenant's profiles |
+| POST | `/api/dashboard/visitor-profiles` | JWT | Create a profile |
+| PUT | `/api/dashboard/visitor-profiles/{profile_id}` | JWT | Update a profile |
+| DELETE | `/api/dashboard/visitor-profiles/{profile_id}` | JWT | Delete a profile |
+| PUT | `/api/dashboard/visitors/{visitor_id}/profile` | JWT | Manual profile override |
+| PUT | `/api/dashboard/visitors/{visitor_id}/identity` | JWT | Update visitor identity |
+| DELETE | `/api/dashboard/visitors/{visitor_id}/identity` | JWT | Clear visitor identity |
 
 ### Conversations
 | Method | Endpoint | Auth | Description |
@@ -1256,4 +1212,4 @@ The embeddable chat widget (`apps/widget/`) is built as a self-executing IIFE bu
 | `lead_form_configs` | Lead form configurations (fields, trigger instructions, enabled status, `field_role` for identity mapping) |
 | `message_feedback` | Like/dislike feedback on AI responses |
 | `knowledge_gaps` | Unanswered queries with embeddings, gap_type, and similarity clustering |
-| `visitor_profiles` | Tenant-defined visitor classification rules, LLM criteria, enabled status |
+| `visitor_profiles` | Tenant-defined visitor profiles (name, description, response instructions, enabled) |
