@@ -350,6 +350,7 @@ COLLECTION_SCHEMAS = {
                 "properties": {
                     "tenant_id": {"bsonType": "string"},
                     "session_id": {"bsonType": "string"},
+                    "visitor_id": {"bsonType": ["string", "null"]},
                     "message_id": {"bsonType": "string"},
                     "rating": {"enum": ["like", "dislike"]},
                     "created_at": {"bsonType": "date"},

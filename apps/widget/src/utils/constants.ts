@@ -1,10 +1,42 @@
 export const SESSION_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
 export const HISTORY_STORAGE_KEY_PREFIX = 'cw_history_';
+export const VISITOR_STORAGE_KEY = 'cw_visitor_id';
+export const SESSION_STORAGE_KEY = 'cw_session_id';
 
-export const getSessionId = (): string => {
-  const match = document.cookie.match(/(?:^|;\s*)chat_session_id=([^;]*)/);
-  return match ? decodeURIComponent(match[1]) : '';
-};
+export function generateId(): string {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0;
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
+
+export function getVisitorId(): string {
+  let id = localStorage.getItem(VISITOR_STORAGE_KEY);
+  if (!id) {
+    id = generateId();
+    localStorage.setItem(VISITOR_STORAGE_KEY, id);
+  }
+  return id;
+}
+
+export function getSessionId(): string {
+  let id = sessionStorage.getItem(SESSION_STORAGE_KEY);
+  if (!id) {
+    id = generateId();
+    sessionStorage.setItem(SESSION_STORAGE_KEY, id);
+  }
+  return id;
+}
+
+export function resetSessionId(): string {
+  const id = generateId();
+  sessionStorage.setItem(SESSION_STORAGE_KEY, id);
+  return id;
+}
+
 
 export const WIDGET_WIDTH = '380px';
 export const WIDGET_HEIGHT = '560px';

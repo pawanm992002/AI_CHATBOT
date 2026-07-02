@@ -46,6 +46,7 @@ class ChatTurnInput:
     tenant: dict
     session_id: str
     query: str
+    visitor_id: str = ""
     current_url: str = ""
     current_page_title: str = ""
     message_id: str = ""
@@ -137,12 +138,12 @@ class ChatService:
         classification = await self._classify_query(turn.query, summary, messages, provider, model)
 
         if classification == QueryClass.GREETING:
-            visitor_name = await self._get_visitor_name(turn.session_id, tenant_id)
+            visitor_name = await self._get_visitor_name(turn.visitor_id or turn.session_id, tenant_id)
             if visitor_name:
                 answer = f"Hi {visitor_name}, welcome back to {business_name}! How can I help you today?"
             else:
                 answer = f"Hello! Welcome to {business_name}. How can I help you today?"
-            await self._track_visitor_message(turn.session_id, turn.tenant["tenant_id"])
+            await self._track_visitor_message(turn.session_id, turn.visitor_id or turn.session_id, turn.tenant["tenant_id"])
             return ChatTurnResult(message_id=turn.message_id, answer=answer, sources=[])
 
         if classification == QueryClass.OUT_OF_SCOPE:
@@ -154,7 +155,7 @@ class ChatService:
             messages.append({"role": "assistant", "content": answer, "usage": usage})
             summary, messages = await self._compact_if_needed(summary, messages, provider, model)
             await self._persist_conversation(turn, summary, messages)
-            await self._track_visitor_message(turn.session_id, turn.tenant["tenant_id"])
+            await self._track_visitor_message(turn.session_id, turn.visitor_id or turn.session_id, turn.tenant["tenant_id"])
             if not show_form:
                 await self._log_knowledge_gap(tenant_id, turn.query, turn.current_url, "out_of_scope", turn.message_id)
             return ChatTurnResult(message_id=turn.message_id, answer=answer, sources=[], show_enquiry_form=show_form, enquiry_form_id=form_id)
@@ -167,7 +168,7 @@ class ChatService:
         profile_name = None
         try:
             visitor_doc = await db.visitors.find_one(
-                {"visitor_id": turn.session_id, "tenant_id": tenant_id},
+                {"visitor_id": turn.visitor_id or turn.session_id, "tenant_id": tenant_id},
                 {"profile_classification_attempted": 1}
             )
             classification_attempted = visitor_doc.get("profile_classification_attempted") if visitor_doc else True
@@ -184,7 +185,7 @@ class ChatService:
         # If profile was identified, classify the visitor
         if profile_name and profiles:
             try:
-                await classify_visitor_inline(tenant_id, turn.session_id, profile_name)
+                await classify_visitor_inline(tenant_id, turn.visitor_id or turn.session_id, profile_name)
             except Exception as e:
                 print(f"[CHAT] Profile classification failed: {e}")
 
@@ -226,12 +227,12 @@ class ChatService:
         classification = await self._classify_query(turn.query, summary, messages, provider, model)
 
         if classification == QueryClass.GREETING:
-            visitor_name = await self._get_visitor_name(turn.session_id, tenant_id)
+            visitor_name = await self._get_visitor_name(turn.visitor_id or turn.session_id, tenant_id)
             if visitor_name:
                 answer = f"Hi {visitor_name}, welcome back to {business_name}! How can I help you today?"
             else:
                 answer = f"Hello! Welcome to {business_name}. How can I help you today?"
-            await self._track_visitor_message(turn.session_id, turn.tenant["tenant_id"])
+            await self._track_visitor_message(turn.session_id, turn.visitor_id or turn.session_id, turn.tenant["tenant_id"])
             return ChatTurnResult(message_id=turn.message_id, answer=answer, sources=[])
 
         if classification == QueryClass.OUT_OF_SCOPE:
@@ -243,7 +244,7 @@ class ChatService:
             messages.append({"role": "assistant", "content": answer, "usage": usage})
             summary, messages = await self._compact_if_needed(summary, messages, provider, model)
             await self._persist_conversation(turn, summary, messages)
-            await self._track_visitor_message(turn.session_id, turn.tenant["tenant_id"])
+            await self._track_visitor_message(turn.session_id, turn.visitor_id or turn.session_id, turn.tenant["tenant_id"])
             if not show_form:
                 await self._log_knowledge_gap(tenant_id, turn.query, turn.current_url, "out_of_scope", turn.message_id)
             return ChatTurnResult(message_id=turn.message_id, answer=answer, sources=[], show_enquiry_form=show_form, enquiry_form_id=form_id)
@@ -256,7 +257,7 @@ class ChatService:
         profile_name = None
         try:
             visitor_doc = await db.visitors.find_one(
-                {"visitor_id": turn.session_id, "tenant_id": tenant_id},
+                {"visitor_id": turn.visitor_id or turn.session_id, "tenant_id": tenant_id},
                 {"profile_classification_attempted": 1}
             )
             classification_attempted = visitor_doc.get("profile_classification_attempted") if visitor_doc else True
@@ -273,7 +274,7 @@ class ChatService:
         # If profile was identified, classify the visitor
         if profile_name and profiles:
             try:
-                await classify_visitor_inline(tenant_id, turn.session_id, profile_name)
+                await classify_visitor_inline(tenant_id, turn.visitor_id or turn.session_id, profile_name)
             except Exception as e:
                 print(f"[CHAT] Profile classification failed: {e}")
 
@@ -324,7 +325,7 @@ class ChatService:
         messages.append({"role": "assistant", "content": full_answer, "usage": usage})
         summary, messages = await self._compact_if_needed(summary, messages, tenant_ai_provider, tenant_ai_model)
         await self._persist_conversation(turn, summary, messages)
-        await self._track_visitor_message(turn.session_id, turn.tenant["tenant_id"])
+        await self._track_visitor_message(turn.session_id, turn.visitor_id or turn.session_id, turn.tenant["tenant_id"])
         if not show_form:
             await self._log_knowledge_gap(tenant_id, turn.query, turn.current_url, gap_type, turn.message_id)
 
@@ -349,11 +350,11 @@ class ChatService:
                 business_name=business_name,
             )
 
-        identity_ctx = await self._get_visitor_identity_context(turn.session_id, tenant_id)
+        identity_ctx = await self._get_visitor_identity_context(turn.visitor_id or turn.session_id, tenant_id)
         if identity_ctx:
             system_prompt += identity_ctx
 
-        profile_context = await get_visitor_profile_context(tenant_id, turn.session_id)
+        profile_context = await get_visitor_profile_context(tenant_id, turn.visitor_id or turn.session_id)
         if profile_context:
             system_prompt += profile_context
 
@@ -383,7 +384,7 @@ class ChatService:
         messages.append({"role": "assistant", "content": full_answer, "usage": usage})
         summary, messages = await self._compact_if_needed(summary, messages, tenant_ai_provider, tenant_ai_model)
         await self._persist_conversation(turn, summary, messages)
-        await self._track_visitor_message(turn.session_id, turn.tenant["tenant_id"])
+        await self._track_visitor_message(turn.session_id, turn.visitor_id or turn.session_id, turn.tenant["tenant_id"])
 
         return ChatTurnResult(message_id=turn.message_id, answer=full_answer, sources=sources, show_enquiry_form=show_form, enquiry_form_id=form_id)
 
@@ -413,7 +414,7 @@ class ChatService:
 
         summary, messages = await self._compact_if_needed(summary, messages, tenant_ai_provider, tenant_ai_model)
         await self._persist_conversation(turn, summary, messages)
-        await self._track_visitor_message(turn.session_id, turn.tenant["tenant_id"])
+        await self._track_visitor_message(turn.session_id, turn.visitor_id or turn.session_id, turn.tenant["tenant_id"])
         if not show_form:
             await self._log_knowledge_gap(tenant_id, turn.query, turn.current_url, gap_type, turn.message_id)
 
@@ -444,11 +445,11 @@ class ChatService:
                 business_name=business_name,
             )
 
-        identity_ctx = await self._get_visitor_identity_context(turn.session_id, tenant_id)
+        identity_ctx = await self._get_visitor_identity_context(turn.visitor_id or turn.session_id, tenant_id)
         if identity_ctx:
             system_prompt += identity_ctx
 
-        profile_context = await get_visitor_profile_context(tenant_id, turn.session_id)
+        profile_context = await get_visitor_profile_context(tenant_id, turn.visitor_id or turn.session_id)
         if profile_context:
             system_prompt += profile_context
 
@@ -466,7 +467,7 @@ class ChatService:
 
         summary, messages = await self._compact_if_needed(summary, messages, tenant_ai_provider, tenant_ai_model)
         await self._persist_conversation(turn, summary, messages)
-        await self._track_visitor_message(turn.session_id, turn.tenant["tenant_id"])
+        await self._track_visitor_message(turn.session_id, turn.visitor_id or turn.session_id, turn.tenant["tenant_id"])
 
         return ChatTurnResult(message_id=turn.message_id, answer=answer, sources=sources, show_enquiry_form=show_form, enquiry_form_id=form_id)
 
@@ -738,9 +739,9 @@ class ChatService:
             archival_service.archive_overflow_turns(turn.session_id, turn.tenant["tenant_id"])
         )
 
-    async def _track_visitor_message(self, session_id: str, tenant_id: str) -> None:
+    async def _track_visitor_message(self, session_id: str, visitor_id: str, tenant_id: str) -> None:
         await db.visitors.update_one(
-            {"visitor_id": session_id, "tenant_id": tenant_id},
+            {"visitor_id": visitor_id, "tenant_id": tenant_id},
             {"$addToSet": {"conversation_ids": session_id}, "$inc": {"total_messages": 1}},
         )
 
@@ -885,10 +886,10 @@ class ChatService:
             heading = f"{heading} - {title}"
         return f"{heading}:\n{chunk['text']}"
 
-    async def _get_visitor_name(self, session_id: str, tenant_id: str) -> str | None:
+    async def _get_visitor_name(self, visitor_id: str, tenant_id: str) -> str | None:
         try:
             visitor = await db.visitors.find_one(
-                {"visitor_id": session_id, "tenant_id": tenant_id},
+                {"visitor_id": visitor_id, "tenant_id": tenant_id},
                 {"identity.name": 1}
             )
             if visitor:
@@ -900,8 +901,8 @@ class ChatService:
             pass
         return None
 
-    async def _get_visitor_identity_context(self, session_id: str, tenant_id: str) -> str:
-        name = await self._get_visitor_name(session_id, tenant_id)
+    async def _get_visitor_identity_context(self, visitor_id: str, tenant_id: str) -> str:
+        name = await self._get_visitor_name(visitor_id, tenant_id)
         if name:
             return f"\nThe visitor's name is {name}. Naturally use their name in conversation when appropriate."
         return ""

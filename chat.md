@@ -1,8 +1,9 @@
 # chat.md — Context Assembly Diagnostic Dump
 
-> **Status:** Bug fixed. This file documents the post-fix code state plus the
-> root-cause analysis and exact changes made. All code blocks below reflect the
-> current production code in `backend/services/chat_service.py`.
+> **Status:** Bug fixed (round 2 — simplification). This file documents the
+> post-fix code state plus the root-cause analysis and exact changes made. All
+> code blocks below reflect the current production code in
+> `backend/services/chat_service.py`.
 
 ---
 
@@ -15,8 +16,9 @@
 5. [Full Request Handler](#5-full-request-handler)
 6. [Session / Turn Data Shape](#6-session--turn-data-shape)
 7. [Bug Root Cause Analysis](#7-bug-root-cause-analysis)
-8. [Changes Made](#8-changes-made)
-9. [Tests Added](#9-tests-added)
+8. [Changes Made (Round 1 — unify paths)](#8-changes-made-round-1--unify-paths)
+9. [Changes Made (Round 2 — remove branching entirely)](#9-changes-made-round-2--remove-branching-entirely)
+10. [Tests Added](#10-tests-added)
 
 ---
 
@@ -401,15 +403,16 @@ The no-match evaluator LLM call:
             return "no_context"
 ```
 
-The no-match prompt builder (decides which prompt template to use):
+The no-match prompt builder (now uses conversation history unconditionally — the old
+`_is_contextual_followup()` check was removed):
 
 ```python
-# backend/services/chat_service.py:548-573
+# backend/services/chat_service.py:524-544
 
     async def _build_no_match_prompt(self, turn: ChatTurnInput, summary: str, messages: list[dict], gap_type: str) -> str:
         business_name = turn.tenant.get("business_name") or turn.tenant["domain"]
 
-        if self._is_contextual_followup(turn.query) and (summary or messages):
+        if summary or messages:
             conversation_text = self._recent_conversation_text(summary, messages, max_messages=30)
             return prompts.FOLLOWUP_NO_MATCH_PROMPT.format(
                 business_name=business_name,
@@ -434,8 +437,7 @@ The no-match prompt builder (decides which prompt template to use):
         return prompt
 ```
 
-The follow-up no-match prompt template (used when the query matches
-`_CONTEXTUAL_FOLLOWUP_PATTERN`):
+The follow-up no-match prompt template (used when there is any conversation history):
 
 ```python
 # backend/services/chat_prompts.py:45-52
@@ -453,10 +455,11 @@ FOLLOWUP_NO_MATCH_PROMPT = (
 **Note:** `_evaluate_no_match` does NOT receive the conversation history — it only
 receives the current query and the tenant's description. It classifies based
 solely on the query text. The `FOLLOWUP_NO_MATCH_PROMPT` does include
-`conversation_text` (up to 30 messages), but only when `_is_contextual_followup`
-matches. If the query doesn't match the regex, it falls through to
-`NO_MATCH_WITH_DESCRIPTION_PROMPT` or `NO_MATCH_GENERIC_PROMPT`, which do NOT
-include the conversation history (only summary is appended if present).
+`conversation_text` (up to 30 messages), and it's now used whenever there is any
+conversation history (`summary or messages`), not just when a regex matches.
+This means even full-sentence follow-ups like "what is the fees" with prior
+context get the richer follow-up prompt instead of falling through to a generic
+no-match template.
 
 ---
 
@@ -539,7 +542,8 @@ async def chat(
     )
 ```
 
-The orchestrator inside `handle_message` (post-fix):
+The orchestrator inside `handle_message` (post-simplification — all PROCEED
+messages go through LLM rewrite unconditionally):
 
 ```python
 # backend/services/chat_service.py:141-228
@@ -592,15 +596,10 @@ The orchestrator inside `handle_message` (post-fix):
         except Exception:
             profiles = None
 
-        # Contextual follow-ups (e.g. "fees?", "what is the fees") go through the
-        # LLM rewrite path so that entities from prior turns are resolved into the
-        # search query — the old _build_contextual_search_query heuristic did not.
-        if (self._is_contextual_followup(turn.query) or classification == QueryClass.NEEDS_REWRITE) and (summary or messages):
-            search_query, profile_name = await self._rewrite_search_query(turn.query, summary, messages, provider, model, profiles=profiles)
-        elif classification == QueryClass.SEARCH_READY:
-            search_query = turn.query
-        else:
-            needs_search = False
+        # Every non-greeting, non-out-of-scope message goes through the LLM
+        # rewrite step, which resolves entities/pronouns/follow-ups from
+        # conversation history into the search query.
+        search_query, profile_name = await self._rewrite_search_query(turn.query, summary, messages, provider, model, profiles=profiles)
 
         # If profile was identified, classify the visitor
         if profile_name and profiles:
@@ -633,6 +632,12 @@ The orchestrator inside `handle_message` (post-fix):
 
         return await self._handle_answer_with_chunks(turn, summary, messages, chunks, needs_search)
 ```
+
+**Key simplification:** The search query construction is now a single line
+(`_rewrite_search_query`) instead of a 3-way branch. There is no
+`SEARCH_READY` bypass, no `_is_contextual_followup()` check, and no
+`needs_search = False` fallthrough. Every PROCEED message gets rewritten with
+conversation context before hitting the knowledge base.
 
 ---
 
@@ -806,9 +811,27 @@ True   'eligibility'                  ← matches
 False  'I am going for JEE dropper'   ← original statement, doesn't match
 ```
 
+### Why Round 2 was needed
+
+Round 1 (unifying `_build_contextual_search_query` and `_rewrite_search_query`)
+helped, but kept a conditional:
+`if (_is_contextual_followup(query) OR classification == NEEDS_REWRITE) AND history`
+→ rewrite, `elif classification == SEARCH_READY` → raw query.
+
+This still relied on the LLM classifier to distinguish between `SEARCH_READY`
+and `NEEDS_REWRITE`. Nobody had verified what the real classifier returned for
+"what is the fees" after "I am going for JEE dropper" — if it returned
+`SEARCH_READY`, the context loss bug would reproduce.
+
+The real fix: **remove the branching entirely**. Every non-greeting,
+non-out-of-scope message goes through `_rewrite_search_query()` unconditionally.
+There is no `SEARCH_READY` bypass. The classifier's only job now is to detect
+greetings and out-of-scope queries — a 2-way distinction that is strictly
+easier than the old 4-way one.
+
 ---
 
-## 8. Changes Made
+## 8. Changes Made (Round 1 — unify paths)
 
 ### File: `backend/services/chat_service.py` (12 insertions, 18 deletions)
 
@@ -876,40 +899,112 @@ text and sent it directly to vector search without resolving entities.
 
 ---
 
-## 9. Tests Added
+## 9. Changes Made (Round 2 — remove branching entirely)
+
+### Motivation
+
+Round 1 unified the two divergent paths (`_build_contextual_search_query` heuristic
+vs `_rewrite_search_query` LLM) into one, but kept a conditional
+`(_is_contextual_followup(query) OR classification == NEEDS_REWRITE)` that still
+allowed a message to bypass entity resolution if the classifier labelled it
+`SEARCH_READY` instead. Nobody verified what the real classifier returns for
+"what is the fees" after "I am going for JEE dropper" — the bug might still
+reproduce.
+
+### The insight
+
+The answer-generation step *already* receives full conversation history (up to
+`MAX_HISTORY=50` messages + rolling summary) — that was never the bug. The only
+thing that needs conversation-aware resolution is the **search query** sent to
+`search_chunks()`, because vector/BM25 search has no memory of prior turns.
+
+Instead of classifying each message into `GREETING` / `OUT_OF_SCOPE` /
+`NEEDS_REWRITE` / `SEARCH_READY` and routing accordingly, we collapsed to three
+cases:
+
+1. **Greeting** — unchanged, fast regex path.
+2. **Out of scope** — unchanged, still needs a classification signal.
+3. **Everything else** — always call `_rewrite_search_query()` before search.
+   No `SEARCH_READY` vs `NEEDS_REWRITE` distinction, no
+   `_is_contextual_followup()` check, no separate heuristic path.
+
+### What was simplified
+
+| Code | Before | After |
+|---|---|---|
+| `QueryClass` enum | `GREETING`, `OUT_OF_SCOPE`, `SEARCH_READY`, `NEEDS_REWRITE` | `GREETING`, `OUT_OF_SCOPE`, `PROCEED` |
+| `_CONTEXTUAL_FOLLOWUP_PATTERN` regex | Existed, matched bare fragments | **Removed** |
+| `_is_contextual_followup()` | Method checking the regex | **Removed** |
+| `_classify_query()` short-circuits | `_is_contextual_followup` + Devanagari returned `NEEDS_REWRITE` | Both removed (all non-greeting → `PROCEED`) |
+| `_classify_query()` LLM fallback | Exception returned `SEARCH_READY` | Exception returns `PROCEED` |
+| Search query construction | 3-way branch in `handle_message` + `handle_message_stream` | Single unconditional `_rewrite_search_query()` call |
+| `_build_no_match_prompt()` | Checked `_is_contextual_followup()` | Checks `summary or messages` instead |
+
+### Files changed
+
+**`backend/services/chat_service.py`:**
+- `QueryClass` enum: collapsed to 3 values
+- `_CONTEXTUAL_FOLLOWUP_PATTERN` regex: deleted
+- `_is_contextual_followup()` method: deleted
+- `_classify_query()`: removed short-circuits, LLM fallback returns `PROCEED`
+- `handle_message()` + `handle_message_stream()`: single rewrite line replaces 3-way branch
+- `_build_no_match_prompt()`: `if summary or messages` replaces `if _is_contextual_followup(...)`
+
+**`backend/services/chat_prompts.py`:**
+- `QUERY_CLASSIFIER_PROMPT`: simplified from 4-label to 3-label prompt
+
+### What stayed the same
+
+- Greeting detection (fast regex, no LLM call)
+- Out-of-scope classification and early return
+- The `_rewrite_search_query()` call itself (unchanged)
+- Knowledge gaps vs out-of-scope tracking in dashboard (completely decoupled)
+- Profile classification inline with rewrite
+
+### Latency impact
+
+Every PROCEED message now makes one `gpt-4o-mini` call for rewriting. Previously,
+messages the classifier labelled `SEARCH_READY` (clear standalone questions)
+skipped this call. Expected added latency is ~100-200ms per message — negligible
+next to the answer-generation LLM call that follows.
+
+---
+
+## 10. Tests Added
 
 ### File: `test_context_loss_fix.py`
 
 Unit tests that verify the fix without requiring a running server or database.
-Run with: `python test_context_loss_fix.py`
+Run with: `python3 test_context_loss_fix.py`
 
-**Test classes:**
+**Test classes (updated for Round 2):**
 
-1. **`TestContextualFollowupRegex`** — Verifies which messages the
-   `_CONTEXTUAL_FOLLOWUP_PATTERN` regex matches. Confirms bare follow-ups
-   ("fees?") match but full questions ("what is the fees") don't.
+1. **`TestSimplifiedRouting`** — Verifies the 3-label routing: `GREETING` →
+   greeting, `OUT_OF_SCOPE` → out-of-scope, `PROCEED` → rewrite. No bypass
+   exists.
 
-2. **`TestRoutingLogic`** — Simulates the routing logic from `handle_message`
-   and verifies that both `_is_contextual_followup` matches AND `NEEDS_REWRITE`
-   classification route through `_rewrite_search_query`, not the old heuristic.
-
-3. **`TestBugScenario`** — Tests all variants of the fee follow-up after JEE
+2. **`TestBugScenario`** — Tests all variants of the fee follow-up after JEE
    dropper context: "yes, but what is the fees", "what is the fees", "and the
-   fees?", "fees?", "tell me more". Asserts they all route through the rewrite
-   path.
+   fees?", "fees?", "tell me more", "eligibility". Asserts they all route
+   through the rewrite path.
 
-4. **`TestOldHeuristicRemoved`** — Documents that `_build_contextual_search_query`
-   no longer exists and is not called by any routing path.
+3. **`TestOldBranchingRemoved`** — Verifies that `SEARCH_READY` and
+   `NEEDS_REWRITE` are no longer valid labels, and that there is no
+   `needs_search = False` fallthrough path.
 
-All 9 test cases pass:
+All 6 test cases pass:
 ```
-test_bug_message_sequences ... ok
-test_bare_followups_match ... ok
-test_full_sentences_do_not_match ... ok
-test_old_function_not_called ... ok
-test_bare_fees_goes_through_rewrite ... ok
-test_full_question_need_rewrite_goes_through_rewrite ... ok
-test_full_question_search_ready_goes_raw ... ok
-test_full_question_search_ready_with_history_goes_rewrite ... ok
-test_no_history_no_search ... ok
+test_greeting_skips_search ... ok
+test_out_of_scope_skips_search ... ok
+test_proceed_goes_through_rewrite ... ok
+test_all_fee_followups_go_through_rewrite ... ok
+test_no_search_ready_bypass ... ok
+test_no_needs_rewrite_no_search_path ... ok
 ```
+
+### File: `test_e2e.py` (new section 7)
+
+End-to-end context loss test added. Sends "I am going for JEE dropper" then
+"what is the fees" in the same session and asserts the bot's answer does not
+contain disambiguation phrases like "which course" or "please specify" — proving
+the rewrite step resolved "the fees" into the prior "JEE dropper" context.

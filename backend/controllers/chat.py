@@ -61,6 +61,7 @@ async def chat(
 ):
     tenant_id = current_tenant["tenant_id"]
     session_id = request.cookies.get("chat_session_id") or req.session_id or str(uuid.uuid4())
+    visitor_id = req.visitor_id or session_id
 
     if len(req.query) > MAX_QUERY_LENGTH:
         raise HTTPException(status_code=400, detail="Query too long.")
@@ -82,6 +83,7 @@ async def chat(
 
     await _upsert_visitor(
         session_id=session_id,
+        visitor_id=visitor_id,
         tenant_id=tenant_id,
         current_url=req.current_url,
         current_page_title=req.current_page_title,
@@ -93,6 +95,7 @@ async def chat(
         ChatTurnInput(
             tenant=current_tenant,
             session_id=session_id,
+            visitor_id=visitor_id,
             query=req.query,
             current_url=req.current_url,
             current_page_title=req.current_page_title,
@@ -121,6 +124,7 @@ async def chat(
 
 @router.post("/feedback")
 async def submit_feedback(req: FeedbackRequest, current_tenant: dict = Depends(verify_api_key)):
+    visitor_id = req.visitor_id or req.session_id
     await db.message_feedback.update_one(
         {
             "tenant_id": current_tenant["tenant_id"],
@@ -130,6 +134,7 @@ async def submit_feedback(req: FeedbackRequest, current_tenant: dict = Depends(v
         {"$set": {
             "tenant_id": current_tenant["tenant_id"],
             "session_id": req.session_id,
+            "visitor_id": visitor_id,
             "message_id": req.message_id,
             "rating": req.rating,
             "created_at": datetime.now(timezone.utc),
@@ -179,6 +184,7 @@ async def websocket_chat(websocket: WebSocket, key_hash: str = Query(...)):
             current_url = data.get("current_url", "")
             current_page_title = data.get("current_page_title", "")
             session_id = data.get("session_id") or str(uuid.uuid4())
+            visitor_id = data.get("visitor_id") or session_id
 
             if not query:
                 await websocket.send_json({"type": "error", "detail": "Empty query"})
@@ -197,6 +203,7 @@ async def websocket_chat(websocket: WebSocket, key_hash: str = Query(...)):
 
             await _upsert_visitor(
                 session_id=session_id,
+                visitor_id=visitor_id,
                 tenant_id=tenant_id,
                 current_url=current_url,
                 current_page_title=current_page_title,
@@ -213,6 +220,7 @@ async def websocket_chat(websocket: WebSocket, key_hash: str = Query(...)):
                     ChatTurnInput(
                         tenant=tenant,
                         session_id=session_id,
+                        visitor_id=visitor_id,
                         query=query,
                         current_url=current_url,
                         current_page_title=current_page_title,
@@ -260,11 +268,13 @@ async def _upsert_visitor(
     current_url: str,
     current_page_title: str,
     client_ip: str,
+    visitor_id: str = "",
 ) -> None:
     try:
         now = datetime.now(timezone.utc)
+        key = visitor_id or session_id
         visitor = await db.visitors.find_one(
-            {"visitor_id": session_id, "tenant_id": tenant_id},
+            {"visitor_id": key, "tenant_id": tenant_id},
             {"ip_history": {"$slice": -1}, "page_views": {"$slice": -1}},
         )
 
@@ -282,12 +292,13 @@ async def _upsert_visitor(
         push: dict[str, object] = {}
         if not visitor:
             update["$setOnInsert"] = {
-                "visitor_id": session_id,
+                "visitor_id": key,
                 "session_id": session_id,
                 "first_seen_at": now,
-                "conversation_ids": [],
                 "total_messages": 0,
             }
+        update["$addToSet"] = {"conversation_ids": session_id}
+
         if needs_ip:
             push["ip_history"] = {
                 "$each": [{"ip": client_ip, "seen_at": now}],
@@ -301,6 +312,6 @@ async def _upsert_visitor(
         if push:
             update["$push"] = push
 
-        await db.visitors.update_one({"visitor_id": session_id, "tenant_id": tenant_id}, update, upsert=True)
+        await db.visitors.update_one({"visitor_id": key, "tenant_id": tenant_id}, update, upsert=True)
     except Exception as e:
-        print(f"[UPSERT] visitor error for session={session_id}: {e}")
+        print(f"[UPSERT] visitor error for visitor={key} session={session_id}: {e}")

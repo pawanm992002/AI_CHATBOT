@@ -32,6 +32,7 @@ export interface EnquiryData {
   phone?: string;
   message?: string;
   session_id: string;
+  visitor_id?: string;
   custom_fields?: Record<string, string>;
 }
 
@@ -195,10 +196,10 @@ class ApiClient {
     });
   }
 
-  public submitFeedback(messageId: string, sessionId: string, rating: 'like' | 'dislike'): Promise<any> {
+  public submitFeedback(messageId: string, sessionId: string, rating: 'like' | 'dislike', visitorId?: string): Promise<any> {
     return this.request<any>("/feedback", {
       method: "POST",
-      body: JSON.stringify({ message_id: messageId, session_id: sessionId, rating }),
+      body: JSON.stringify({ message_id: messageId, session_id: sessionId, rating, visitor_id: visitorId }),
     });
   }
 }
@@ -214,5 +215,5 @@ export const submitEnquiry = (data: EnquiryData) =>
 export const getLeadFormById = (formId: string) =>
   apiClient.getLeadFormById(formId);
 
-export const submitFeedback = (messageId: string, sessionId: string, rating: 'like' | 'dislike') =>
-  apiClient.submitFeedback(messageId, sessionId, rating);
+export const submitFeedback = (messageId: string, sessionId: string, rating: 'like' | 'dislike', visitorId?: string) =>
+  apiClient.submitFeedback(messageId, sessionId, rating, visitorId);

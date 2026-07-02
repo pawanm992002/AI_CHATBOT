@@ -259,6 +259,8 @@ async def submit_lead(req: LeadSubmitRequest, request: Request, current_tenant: 
     if "phone" in identity_fields:
         phone = identity_fields["phone"]
 
+    visitor_id = req.visitor_id or session_id or ""
+
     now = datetime.now(timezone.utc)
     lead = {
         "lead_id": str(uuid.uuid4()),
@@ -272,14 +274,14 @@ async def submit_lead(req: LeadSubmitRequest, request: Request, current_tenant: 
         "source_url": "",
         "form_id": req.form_id or "",
         "custom_fields": custom_fields,
-        "visitor_id": session_id,
+        "visitor_id": visitor_id,
         "created_at": now,
     }
 
     await lead_repo.create(lead)
 
     # Sync identity to visitor record
-    if session_id and (name or email or phone):
+    if visitor_id and (name or email or phone):
         identity_update = {}
         if name:
             identity_update["identity.name"] = name
@@ -291,7 +293,7 @@ async def submit_lead(req: LeadSubmitRequest, request: Request, current_tenant: 
         identity_update["identity.source_lead_id"] = lead["lead_id"]
 
         await db.visitors.update_one(
-            {"visitor_id": session_id, "tenant_id": tenant_id},
+            {"visitor_id": visitor_id, "tenant_id": tenant_id},
             {"$set": identity_update},
         )
 

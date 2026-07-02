@@ -26,6 +26,7 @@ class CrawlRequest(BaseModel):
 class ChatRequest(BaseModel):
     query: str
     session_id: Optional[str] = None
+    visitor_id: Optional[str] = None  # NEW
     current_url: str
     current_page_title: str
 
@@ -66,6 +67,7 @@ class EnquirySubmitRequest(BaseModel):
 class FeedbackRequest(BaseModel):
     message_id: str
     session_id: str
+    visitor_id: Optional[str] = None  # NEW
     rating: str = Field(..., pattern=r"^(like|dislike)$")
 
 
@@ -111,4 +113,5 @@ class LeadSubmitRequest(BaseModel):
     phone: Optional[str] = None
     message: Optional[str] = None
     session_id: str
+    visitor_id: Optional[str] = None  # NEW
     custom_fields: Optional[dict] = None

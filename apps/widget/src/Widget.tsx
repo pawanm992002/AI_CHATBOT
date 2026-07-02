@@ -17,7 +17,9 @@ import {
   DRAG_HANDLE_WIDTH,
   DRAG_HANDLE_HEIGHT,
   SCROLL_INTO_VIEW_DELAY,
-  getSessionId
+  getSessionId,
+  getVisitorId,
+  resetSessionId
 } from './utils/constants';
 
 export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
@@ -125,6 +127,12 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
       return m;
     }));
   }, []);
+
+  const handleNewSession = useCallback(() => {
+    resetSessionId();
+    setMessages([]);
+    sessionStorage.removeItem(`${HISTORY_STORAGE_KEY_PREFIX}${apiKey}`);
+  }, [apiKey]);
 
   const getWs = useCallback(async (): Promise<WebSocket> => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -280,6 +288,7 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
         current_url: window.location.href,
         current_page_title: document.title,
         session_id: getSessionId(),
+        visitor_id: getVisitorId(),
       }));
 
       // Safety timeout — if stream doesn't complete in 60s, reset loading state
@@ -326,6 +335,7 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
         custom_fields: formData.custom_fields,
         message: contextText,
         session_id: getSessionId(),
+        visitor_id: getVisitorId(),
       });
 
       setMessages(prev => prev.map((m, i) =>
@@ -341,7 +351,7 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
     if (!msg || !msg.messageId || msg.feedback === rating) return;
 
     try {
-      await submitFeedback(msg.messageId, getSessionId(), rating);
+      await submitFeedback(msg.messageId, getSessionId(), rating, getVisitorId());
       setMessages(prev => prev.map((m, i) =>
         i === msgIndex ? { ...m, feedback: rating } : m
       ));
@@ -423,7 +433,7 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
             )}
 
             {/* Header */}
-            <Header palette={palette} onClose={() => setIsOpen(false)} />
+            <Header palette={palette} onClose={() => setIsOpen(false)} onNewSession={handleNewSession} />
 
             {/* Messages area */}
             {isDisabled ? (
