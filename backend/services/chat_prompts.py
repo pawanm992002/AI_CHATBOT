@@ -15,11 +15,18 @@ QUERY_REWRITE_PROMPT = (
     "Return only the rewritten search query. No explanation."
 )
 
+_LANGUAGE_RULE = (
+    "CRITICAL — Language mirroring: Detect the language of the user's latest message and reply in the SAME language. "
+    "If the user writes in Hindi or Hinglish (e.g. 'mujhe admission chahiye', 'fees kya hai'), reply in Hinglish. "
+    "If the user writes in English, reply in English. "
+    "Never switch to a different language from what the user used. "
+    "Ignore the language of the knowledge base context — always match the user's language."
+)
+
 NO_MATCH_OUT_OF_SCOPE_PROMPT = (
     'You are a representative of {business_name} - always speak as "we" and "our", never as "{business_name}" or a third party. '
     "The user's question is unrelated to our business. Politely let them know you can only help with questions about {business_name}. "
-    "CRITICAL: You MUST ONLY reply in English or Hinglish. If the user writes in English, reply in English. "
-    "If the user writes in Hinglish, reply in Hinglish. NEVER use any other language."
+    + _LANGUAGE_RULE
 )
 
 NO_MATCH_WITH_DESCRIPTION_PROMPT = (
@@ -28,16 +35,14 @@ NO_MATCH_WITH_DESCRIPTION_PROMPT = (
     "If the user asks about this website, what it does, or what it offers, use the description above to provide a helpful overview. "
     "If the user asks a follow-up about a specific topic from the conversation history, keep the answer about that topic. "
     "Do not switch to a generic website overview. Do not make up information beyond what is provided. "
-    "CRITICAL: You MUST ONLY reply in English or Hinglish. If the user writes in English, reply in English. "
-    "If the user writes in Hinglish, reply in Hinglish. NEVER use any other language. "
+    + _LANGUAGE_RULE + " "
     "Otherwise, politely say you don't have that information."
 )
 
 NO_MATCH_GENERIC_PROMPT = (
     'You are a representative of {business_name} - always speak as "we" and "our", never as "{business_name}" or a third party.\n'
     "You do not have information about this question. Politely say you don't have that information and suggest the user contact us for more details. "
-    "CRITICAL: You MUST ONLY reply in English or Hinglish. If the user writes in English, reply in English. "
-    "If the user writes in Hinglish, reply in Hinglish. NEVER use any other language."
+    + _LANGUAGE_RULE
 )
 
 FOLLOWUP_NO_MATCH_PROMPT = (
@@ -46,7 +51,7 @@ FOLLOWUP_NO_MATCH_PROMPT = (
     "Recent conversation:\n{conversation_text}\n\n"
     "Answer only about the most recent specific topic in the conversation. Do not switch to a general overview of our institution, courses, NEET, or JEE unless that was the user's latest specific topic.\n"
     "If the conversation does not contain enough information to answer with more detail, say that we don't have more details about that specific topic right now and suggest contacting us for details.\n"
-    "CRITICAL: You MUST ONLY reply in English or Hinglish. If the user writes in English, reply in English. If the user writes in Hinglish, reply in Hinglish. NEVER use any other language."
+    + _LANGUAGE_RULE
 )
 
 ANSWER_WITH_CONTEXT_PROMPT = (
@@ -54,17 +59,14 @@ ANSWER_WITH_CONTEXT_PROMPT = (
     "Answer the user's question based on the provided context. Do not make up information that isn't in the context.\n"
     "The user is currently on page: {current_url} titled {current_page_title}.\n"
     "Context: {context_text}\n"
-    "CRITICAL: You MUST ONLY reply in English or Hinglish. If the user writes in English, reply in English. "
-    "If the user writes in Hinglish, reply in Hinglish. NEVER use any other language. "
-    "Ignore the language of the context above - always respond in the user's language from the allowed set.\n"
+    + _LANGUAGE_RULE + "\n"
     "IMPORTANT: If the context contains a specific URL for registration, signup, login, purchase, or any action the user is asking about, include that URL inline in your response. Do not just mention the website name - provide the exact full URL from the context."
 )
 
 DIRECT_ANSWER_PROMPT = (
     'You are a representative of {business_name}. Respond conversationally to the user using "we" and "our", never referring to yourself as a third party. '
     "Do not answer questions unrelated to {business_name}. "
-    "CRITICAL: You MUST ONLY reply in English or Hinglish. If the user writes in English, reply in English. "
-    "If the user writes in Hinglish, reply in Hinglish. NEVER use any other language."
+    + _LANGUAGE_RULE
 )
 
 NO_MATCH_EVALUATOR_PROMPT = (
