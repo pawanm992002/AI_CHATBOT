@@ -45,9 +45,9 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
     encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET, algorithm=ALGORITHM)
     return encoded_jwt
 
-def set_auth_cookie(response: Response, token: str, request: Request = None):
+def set_auth_cookie(response: Response, token: str, request: Request | None = None):
     secure = settings.COOKIE_SECURE
-    samesite = settings.COOKIE_SAMESITE
+    samesite: str = settings.COOKIE_SAMESITE
 
     if request:
         is_secure = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
@@ -62,13 +62,13 @@ def set_auth_cookie(response: Response, token: str, request: Request = None):
         max_age=COOKIE_MAX_AGE,
         httponly=True,
         secure=secure,
-        samesite=samesite,
+        samesite=samesite,  # type: ignore[arg-type]
         path="/",
     )
 
-def clear_auth_cookie(response: Response, request: Request = None):
+def clear_auth_cookie(response: Response, request: Request | None = None):
     secure = settings.COOKIE_SECURE
-    samesite = settings.COOKIE_SAMESITE
+    samesite: str = settings.COOKIE_SAMESITE
 
     if request:
         is_secure = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
@@ -82,7 +82,7 @@ def clear_auth_cookie(response: Response, request: Request = None):
         path="/",
         httponly=True,
         secure=secure,
-        samesite=samesite,
+        samesite=samesite,  # type: ignore[arg-type]
     )
 
 async def get_current_user(request: Request):
@@ -96,8 +96,8 @@ async def get_current_user(request: Request):
         raise credentials_exception
     try:
         payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[ALGORITHM])
-        sub: str = payload.get("sub")
-        role: str = payload.get("role")
+        sub: str | None = payload.get("sub")
+        role: str | None = payload.get("role")
         if sub is None or role is None:
             raise credentials_exception
     except JWTError:

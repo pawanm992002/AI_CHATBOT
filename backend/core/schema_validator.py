@@ -304,23 +304,7 @@ COLLECTION_SCHEMAS = {
                     },
                     "profile_id": {"bsonType": ["string", "null"]},
                     "profile_label": {"bsonType": ["string", "null"]},
-                    "profile_confidence": {"bsonType": ["double", "null"]},
-                    "profile_history": {
-                        "bsonType": "array",
-                        "items": {
-                            "bsonType": "object",
-                            "required": ["profile_id", "profile_label", "assigned_at", "reason", "source"],
-                            "properties": {
-                                "profile_id": {"bsonType": "string"},
-                                "profile_label": {"bsonType": "string"},
-                                "assigned_at": {"bsonType": "date"},
-                                "reason": {"bsonType": "string"},
-                                "source": {"enum": ["rule", "llm"]},
-                                "trigger": {"enum": ["auto", "manual"]},
-                            },
-                        },
-                    },
-                    "last_classified_at": {"bsonType": ["date", "null"]},
+                    "profile_classification_attempted": {"bsonType": "bool"},
                     "identity": {
                         "bsonType": "object",
                         "properties": {
@@ -332,6 +316,26 @@ COLLECTION_SCHEMAS = {
                         },
                     },
                     "utm_source": {"bsonType": ["string", "null"]},
+                },
+            }
+        },
+        "validationLevel": "moderate",
+        "validationAction": "error",
+    },
+    "visitor_profiles": {
+        "validator": {
+            "$jsonSchema": {
+                "bsonType": "object",
+                "required": ["tenant_id", "name", "created_at"],
+                "properties": {
+                    "tenant_id": {"bsonType": "string"},
+                    "name": {"bsonType": "string"},
+                    "description": {"bsonType": ["string", "null"]},
+                    "response_instructions": {"bsonType": ["string", "null"]},
+                    "color": {"bsonType": ["string", "null"]},
+                    "enabled": {"bsonType": "bool"},
+                    "created_at": {"bsonType": "date"},
+                    "updated_at": {"bsonType": ["date", "null"]},
                 },
             }
         },
@@ -382,38 +386,6 @@ COLLECTION_SCHEMAS = {
                         },
                     },
                     "trigger_instructions": {"bsonType": "string"},
-                    "enabled": {"bsonType": "bool"},
-                    "created_at": {"bsonType": "date"},
-                    "updated_at": {"bsonType": "date"},
-                },
-            }
-        },
-        "validationLevel": "moderate",
-        "validationAction": "error",
-    },
-    "visitor_profiles": {
-        "validator": {
-            "$jsonSchema": {
-                "bsonType": "object",
-                "required": ["profile_id", "tenant_id", "name", "description", "color", "rules", "enabled", "created_at", "updated_at"],
-                "properties": {
-                    "profile_id": {"bsonType": "string"},
-                    "tenant_id": {"bsonType": "string"},
-                    "name": {"bsonType": "string"},
-                    "description": {"bsonType": "string"},
-                    "color": {"bsonType": "string"},
-                    "rules": {
-                        "bsonType": "array",
-                        "items": {
-                            "bsonType": "object",
-                            "required": ["type"],
-                            "properties": {
-                                "type": {"enum": ["page_visited", "lead_form_field", "message_count_gte", "keyword_match", "utm_source"]},
-                                "priority": {"bsonType": "int"},
-                            },
-                        },
-                    },
-                    "llm_criteria": {"bsonType": ["string", "null"]},
                     "enabled": {"bsonType": "bool"},
                     "created_at": {"bsonType": "date"},
                     "updated_at": {"bsonType": "date"},

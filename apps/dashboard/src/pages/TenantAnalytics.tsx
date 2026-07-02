@@ -20,7 +20,6 @@ import TimeSeriesChart from '../components/analytics/TimeSeriesChart';
 import FeedbackBreakdown from '../components/analytics/FeedbackBreakdown';
 import DateRangeFilter from '../components/analytics/DateRangeFilter';
 import ModelUsageTable from '../components/analytics/ModelUsageTable';
-import ProfileDistribution from '../components/analytics/ProfileDistribution';
 import TenantSelector from '../components/analytics/TenantSelector';
 import { LoadingSpinner } from '@chatbot/shared';
 
@@ -31,7 +30,6 @@ const TenantAnalytics = () => {
   const [error, setError] = useState('');
   const [period, setPeriod] = useState('30d');
   const [data, setData] = useState<TenantAnalyticsDetail | null>(null);
-  const [profileStats, setProfileStats] = useState<any[]>([]);
 
   const loadData = useCallback(async () => {
     if (!tenantId) return;
@@ -40,13 +38,6 @@ const TenantAnalytics = () => {
       setError('');
       const result = await fetchTenantAnalytics(tenantId, period);
       setData(result);
-      try {
-        const { adminAxios } = await import('../utils/axios');
-        const ps = await adminAxios.get(`/admin/analytics/tenant/${tenantId}/profile-stats`);
-        setProfileStats(ps.data.items || []);
-      } catch {
-        // Profile stats are optional
-      }
     } catch (err: any) {
       setError(err.response?.data?.detail || err.message || 'Failed to load tenant analytics');
     } finally {
@@ -213,9 +204,6 @@ const TenantAnalytics = () => {
 
       {/* Model Usage */}
       <ModelUsageTable data={kpi.model_usage} />
-
-      {/* Profile Distribution */}
-      <ProfileDistribution data={profileStats} />
 
       {/* Feedback */}
       <FeedbackBreakdown likes={kpi.likes} dislikes={kpi.dislikes} />

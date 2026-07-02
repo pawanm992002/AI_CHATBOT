@@ -1,9 +1,10 @@
 from langchain_openai import OpenAIEmbeddings
+from pydantic import SecretStr
 from core.config import settings
 
 embeddings = OpenAIEmbeddings(
     model="text-embedding-3-small",
-    api_key=settings.OPENAI_API_KEY,
+    api_key=SecretStr(settings.OPENAI_API_KEY),
     max_retries=3,
 )
 

@@ -29,7 +29,7 @@ async def _delete_source_data(tenant_id: str, source_id: str) -> None:
     await db.pages.delete_many({"tenant_id": tenant_id, "source_id": source_id})
 
 
-async def _create_source_job(tenant_id: str, source_id: str, job_type: str, config: dict = None) -> str:
+async def _create_source_job(tenant_id: str, source_id: str, job_type: str, config: dict | None = None) -> str:
     job_id = str(uuid.uuid4())
     job_doc = {
         "tenant_id": tenant_id,

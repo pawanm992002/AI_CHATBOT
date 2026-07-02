@@ -19,7 +19,7 @@ def _load_models() -> list[dict[str, Any]]:
 @router.get("/providers")
 async def list_providers() -> list[str]:
     models = _load_models()
-    providers = sorted({m.get("provider") for m in models if m.get("provider")})
+    providers = sorted({str(m.get("provider")) for m in models if m.get("provider")})
     return [p.title() if p.lower() != "openrouter" else "OpenRouter" for p in providers]
 
 

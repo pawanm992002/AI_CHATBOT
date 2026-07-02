@@ -44,6 +44,18 @@ export interface TextDoc {
   created_at: string;
 }
 
+export interface VisitorProfile {
+  id?: string;
+  tenant_id?: string;
+  name: string;
+  description?: string;
+  response_instructions?: string;
+  color?: string;
+  enabled?: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface Lead {
   lead_id: string;
   name: string;
@@ -77,28 +89,6 @@ export interface LeadFormConfig {
   updated_at: string;
 }
 
-export interface VisitorProfile {
-  profile_id: string;
-  name: string;
-  description: string;
-  color: string;
-  rules: ProfileRule[];
-  llm_criteria?: string | null;
-  enabled: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface ProfileRule {
-  type: 'page_visited' | 'lead_form_field' | 'message_count_gte' | 'keyword_match' | 'utm_source';
-  priority: number;
-  pattern?: string;
-  field_key?: string;
-  count?: number;
-  keywords?: string[];
-  sources?: string[];
-}
-
 export interface VisitorIdentity {
   name?: string | null;
   email?: string | null;
@@ -116,7 +106,6 @@ export interface Visitor {
   total_messages: number;
   profile_id?: string | null;
   profile_label?: string | null;
-  profile_confidence?: number | null;
   identity?: VisitorIdentity;
   utm_source?: string;
 }

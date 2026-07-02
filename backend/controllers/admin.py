@@ -45,8 +45,8 @@ from core.auth import hash_api_key
 async def get_all_tenants(
     page: int = 1,
     limit: int = 10,
-    search: str = None,
-    status: str = None,
+    search: str | None = None,
+    status: str | None = None,
     admin: dict = Depends(get_current_admin)
 ):
     query = {}

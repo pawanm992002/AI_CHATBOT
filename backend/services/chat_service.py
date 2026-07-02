@@ -19,6 +19,13 @@ from repositories.lead_repository import LeadFormConfigRepository
 
 from . import chat_prompts as prompts
 from services.archival_service import archival_service
+from services.visitor_profile_service import (
+    get_enabled_profiles_for_classification,
+    build_profile_classification_prompt,
+    parse_profile_from_rewrite_response,
+    classify_visitor_inline,
+    get_visitor_profile_context,
+)
 
 
 MAX_HISTORY = 50
@@ -162,14 +169,36 @@ class ChatService:
 
         search_query = turn.query
         needs_search = True
+
+        # Profile classification: fetch profiles if visitor hasn't been classified yet
+        profiles = None
+        profile_name = None
+        try:
+            visitor_doc = await db.visitors.find_one(
+                {"visitor_id": turn.session_id, "tenant_id": tenant_id},
+                {"profile_classification_attempted": 1}
+            )
+            classification_attempted = visitor_doc.get("profile_classification_attempted") if visitor_doc else True
+            if not classification_attempted:
+                profiles = await get_enabled_profiles_for_classification(tenant_id)
+        except Exception:
+            profiles = None
+
         if self._is_contextual_followup(turn.query) and (summary or messages):
             search_query = self._build_contextual_search_query(turn.query, summary, messages)
         elif classification == QueryClass.NEEDS_REWRITE:
-            search_query = await self._rewrite_search_query(turn.query, summary, messages, provider, model)
+            search_query, profile_name = await self._rewrite_search_query(turn.query, summary, messages, provider, model, profiles=profiles)
         elif classification == QueryClass.SEARCH_READY:
             search_query = turn.query
         else:
             needs_search = False
+
+        # If profile was identified, classify the visitor
+        if profile_name and profiles:
+            try:
+                await classify_visitor_inline(tenant_id, turn.session_id, profile_name)
+            except Exception as e:
+                print(f"[CHAT] Profile classification failed: {e}")
 
         print(f"[CHAT] query='{turn.query}' class={classification} search_query='{search_query}' needs_search={needs_search}")
 
@@ -233,14 +262,36 @@ class ChatService:
 
         search_query = turn.query
         needs_search = True
+
+        # Profile classification: fetch profiles if visitor hasn't been classified yet
+        profiles = None
+        profile_name = None
+        try:
+            visitor_doc = await db.visitors.find_one(
+                {"visitor_id": turn.session_id, "tenant_id": tenant_id},
+                {"profile_classification_attempted": 1}
+            )
+            classification_attempted = visitor_doc.get("profile_classification_attempted") if visitor_doc else True
+            if not classification_attempted:
+                profiles = await get_enabled_profiles_for_classification(tenant_id)
+        except Exception:
+            profiles = None
+
         if self._is_contextual_followup(turn.query) and (summary or messages):
             search_query = self._build_contextual_search_query(turn.query, summary, messages)
         elif classification == QueryClass.NEEDS_REWRITE:
-            search_query = await self._rewrite_search_query(turn.query, summary, messages, provider, model)
+            search_query, profile_name = await self._rewrite_search_query(turn.query, summary, messages, provider, model, profiles=profiles)
         elif classification == QueryClass.SEARCH_READY:
             search_query = turn.query
         else:
             needs_search = False
+
+        # If profile was identified, classify the visitor
+        if profile_name and profiles:
+            try:
+                await classify_visitor_inline(tenant_id, turn.session_id, profile_name)
+            except Exception as e:
+                print(f"[CHAT] Profile classification failed: {e}")
 
         chunks = []
         top_score = 0.0
@@ -317,6 +368,10 @@ class ChatService:
         identity_ctx = await self._get_visitor_identity_context(turn.session_id, tenant_id)
         if identity_ctx:
             system_prompt += identity_ctx
+
+        profile_context = await get_visitor_profile_context(tenant_id, turn.session_id)
+        if profile_context:
+            system_prompt += profile_context
 
         if summary:
             system_prompt += f"\n\nHere is a summary of the conversation so far:\n{summary}"
@@ -409,6 +464,10 @@ class ChatService:
         if identity_ctx:
             system_prompt += identity_ctx
 
+        profile_context = await get_visitor_profile_context(tenant_id, turn.session_id)
+        if profile_context:
+            system_prompt += profile_context
+
         if summary:
             system_prompt += f"\n\nHere is a summary of the conversation so far:\n{summary}"
 
@@ -454,7 +513,7 @@ class ChatService:
         except Exception:
             return QueryClass.SEARCH_READY
 
-    async def _rewrite_search_query(self, query: str, summary: str, messages: list[dict], provider: str = "openai", model: str = "gpt-4o-mini") -> str:
+    async def _rewrite_search_query(self, query: str, summary: str, messages: list[dict], provider: str = "openai", model: str = "gpt-4o-mini", profiles: list[dict] | None = None) -> tuple[str, str | None]:
         conversation_text = self._recent_conversation_text(summary, messages)
         user_prompt = f"Latest user message: {query.strip()}"
         if conversation_text:
@@ -463,18 +522,24 @@ class ChatService:
                 f"Latest user message: {query.strip()}"
             )
 
+        system_content = prompts.QUERY_REWRITE_PROMPT
+        if profiles:
+            system_content += build_profile_classification_prompt(profiles)
+
         try:
             llm = get_llm(provider, model)
             resp = await llm.ainvoke(
                 [
-                    {"role": "system", "content": prompts.QUERY_REWRITE_PROMPT},
+                    {"role": "system", "content": system_content},
                     {"role": "user", "content": user_prompt},
                 ]
             )
-            rewritten = (resp.content or "").strip()
-            return rewritten if rewritten and len(rewritten) <= 240 else query.strip()
+            response_text = (resp.content or "").strip()
+            profile_name = parse_profile_from_rewrite_response(response_text, profiles or [])
+            rewritten = response_text.split("\n")[0].strip() if "\n" in response_text else response_text
+            return (rewritten if rewritten and len(rewritten) <= 240 else query.strip()), profile_name
         except Exception:
-            return query.strip()
+            return query.strip(), None
 
     async def _build_no_match_prompt(self, turn: ChatTurnInput, summary: str, messages: list[dict], gap_type: str) -> str:
         business_name = turn.tenant.get("business_name") or turn.tenant["domain"]
@@ -539,7 +604,8 @@ class ChatService:
 
         usage = extract_usage(response, provider, model, latency_ms)
 
-        answer = response.content or ""
+        content = response.content
+        answer: str = content if isinstance(content, str) else ""
         show_form = False
         form_id = ""
         if hasattr(response, "tool_calls") and response.tool_calls:
@@ -600,8 +666,8 @@ class ChatService:
                 if chunk.content and isinstance(chunk.content, str):
                     full_answer += chunk.content
                     yield chunk.content
-                for tc_chunk in (chunk.tool_call_chunks or []):
-                    idx = tc_chunk.get("index", 0)
+                for tc_chunk in (getattr(chunk, "tool_call_chunks", None) or []):
+                    idx: int = tc_chunk.get("index", 0)  # type: ignore[assignment]
                     if tc_chunk.get("name"):
                         tool_call_names[idx] = tc_chunk["name"]
                     if tc_chunk.get("args"):

@@ -44,8 +44,8 @@ export const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
       badge: state.gapsCount > 0 ? state.gapsCount : undefined 
     },
     { label: 'Leads', icon: Users, path: '/leads' },
-    { label: 'Visitor Profiles', icon: Tag, path: '/visitor-profiles' },
     { label: 'AI Provider', icon: Brain, path: '/ai-provider' },
+    { label: 'Visitor Profiles', icon: Tag, path: '/visitor-profiles' },
     { label: 'Settings', icon: Settings, path: '/settings' },
   ];
 

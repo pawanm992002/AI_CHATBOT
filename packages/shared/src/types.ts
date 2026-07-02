@@ -1,25 +1,3 @@
-export interface VisitorProfile {
-  profile_id: string;
-  name: string;
-  description: string;
-  color: string;
-  rules: ProfileRule[];
-  llm_criteria?: string | null;
-  enabled: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface ProfileRule {
-  type: 'page_visited' | 'lead_form_field' | 'message_count_gte' | 'keyword_match' | 'utm_source';
-  priority: number;
-  pattern?: string;
-  field_key?: string;
-  count?: number;
-  keywords?: string[];
-  sources?: string[];
-}
-
 export interface Visitor {
   session_id: string;
   tenant_id: string;
@@ -31,20 +9,8 @@ export interface Visitor {
   page_views?: { url: string; title: string; timestamp: string }[];
   profile_id?: string | null;
   profile_label?: string | null;
-  profile_confidence?: number | null;
-  profile_history?: ProfileHistoryEntry[];
-  last_classified_at?: string | null;
   identity?: VisitorIdentity;
   utm_source?: string;
-}
-
-export interface ProfileHistoryEntry {
-  profile_id: string;
-  profile_label: string;
-  assigned_at: string;
-  reason: string;
-  source: 'rule' | 'llm';
-  trigger?: 'auto' | 'manual';
 }
 
 export interface VisitorIdentity {
@@ -53,6 +19,18 @@ export interface VisitorIdentity {
   phone?: string | null;
   updated_at?: string | null;
   source_lead_id?: string | null;
+}
+
+export interface VisitorProfile {
+  id?: string;
+  tenant_id?: string;
+  name: string;
+  description?: string;
+  response_instructions?: string;
+  color?: string;
+  enabled?: boolean;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface Lead {

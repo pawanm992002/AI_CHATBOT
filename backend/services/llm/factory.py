@@ -6,6 +6,7 @@ from typing import Any, AsyncGenerator, Sequence
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
+from pydantic import SecretStr
 
 from core.config import settings
 
@@ -104,12 +105,12 @@ class _LLMWrapper:
             latency_ms = (time.perf_counter() - start) * 1000
             # Attach latency to response for extract_usage
             if not hasattr(result, "_latency_ms"):
-                result._latency_ms = latency_ms
+                setattr(result, "_latency_ms", latency_ms)
             return result
         except Exception as e:
             latency_ms = (time.perf_counter() - start) * 1000
             # Re-raise with latency info attached to the exception
-            e._latency_ms = latency_ms
+            setattr(e, "_latency_ms", latency_ms)
             raise
 
     async def astream(self, messages: list[dict[str, Any]], **kwargs) -> AsyncGenerator[str | dict[str, Any], None]:
@@ -161,7 +162,7 @@ def get_llm(provider: str, model: str) -> _LLMWrapper:
             from langchain_openai import ChatOpenAI
             return _LLMWrapper(_llm=ChatOpenAI(
                 model=model_norm,
-                api_key=settings.OPENAI_API_KEY,
+                api_key=SecretStr(settings.OPENAI_API_KEY),
                 max_retries=3,
             ))
 
@@ -169,7 +170,7 @@ def get_llm(provider: str, model: str) -> _LLMWrapper:
             from langchain_openai import ChatOpenAI
             return _LLMWrapper(_llm=ChatOpenAI(
                 model=model_norm,
-                api_key=settings.GROQ_API_KEY,
+                api_key=SecretStr(settings.GROQ_API_KEY),
                 base_url="https://api.groq.com/openai/v1",
                 max_retries=3,
             ))
@@ -178,7 +179,7 @@ def get_llm(provider: str, model: str) -> _LLMWrapper:
             from langchain_openai import ChatOpenAI
             return _LLMWrapper(_llm=ChatOpenAI(
                 model=model_norm,
-                api_key=settings.OPENROUTER_API_KEY,
+                api_key=SecretStr(settings.OPENROUTER_API_KEY),
                 base_url="https://openrouter.ai/api/v1",
                 max_retries=3,
             ))
@@ -193,7 +194,7 @@ def get_llm(provider: str, model: str) -> _LLMWrapper:
             from langchain_openai import ChatOpenAI
             return _LLMWrapper(_llm=ChatOpenAI(
                 model=DEFAULT_MODEL_FALLBACK,
-                api_key=settings.OPENAI_API_KEY,
+                api_key=SecretStr(settings.OPENAI_API_KEY),
                 max_retries=3,
             ))
         except Exception as e2:

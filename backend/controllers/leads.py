@@ -152,6 +152,8 @@ async def update_lead_form(
 
     await form_config_repo.update(tenant_id, form_id, update_data)
     updated = await form_config_repo.get_by_form_id(tenant_id, form_id)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Lead form config not found")
     return _config_to_response(updated)
 
 

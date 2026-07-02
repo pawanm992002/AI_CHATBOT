@@ -12,6 +12,8 @@ import socket
 import sys
 import uuid
 
+from motor.motor_asyncio import AsyncIOMotorClient as MotorClient
+
 orig_getaddrinfo = socket.getaddrinfo
 def getaddrinfo_ipv4(host, port, family=0, type=0, proto=0, flags=0):
     return orig_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
@@ -136,8 +138,6 @@ async def main():
 
     if mongodb_uri:
         try:
-            from motor.motor_asyncio import AsyncIOMotorClient
-            MotorClient = AsyncIOMotorClient
             mc = MotorClient(mongodb_uri, serverSelectionTimeoutMS=5000)
             db = mc[db_name]
             cursor = await db.list_collections()
@@ -146,7 +146,7 @@ async def main():
                 names.append(c["name"])
             ok("MongoDB connected", f"{len(names)} collections, db={db_name}")
 
-            for name in ["visitor_profiles", "visitors", "conversations", "leads", "lead_form_configs"]:
+            for name in ["visitors", "conversations", "leads", "lead_form_configs"]:
                 status = "exists" if name in names else "MISSING"
                 (ok if name in names else fail)(f"Collection '{name}'", status)
                 if name in names:
@@ -170,71 +170,8 @@ async def main():
     else:
         widget = fresh_widget()
 
-        # ── 4. Visitor Profiles CRUD ──────────────────────────────
-        print("\n--- 4. Visitor Profiles CRUD ---")
-
-        r = await tenant_cli.get("/api/dashboard/visitor-profiles")
-        ok("List profiles (initial)", f"count={len(r.json())}") if r.status_code == 200 else fail("List", f"{r.status_code}")
-
-        p1 = {"name": f"{TEST_PREFIX} - Enterprise", "description": "Enterprise visitors", "color": "#4F46E5",
-              "enabled": True,
-              "rules": [{"type": "keyword_match", "keywords": ["enterprise", "corporate"], "priority": 10}],
-              "llm_criteria": "Visitor asking about enterprise features"}
-        r = await tenant_cli.post("/api/dashboard/visitor-profiles", json=p1)
-        pid1 = r.json().get("profile_id") if r.status_code in (200, 201) else None
-        ok("Create profile 1", f"id={pid1}") if pid1 else fail("Create profile 1", f"{r.status_code}: {r.text[:200]}")
-
-        p2 = {"name": f"{TEST_PREFIX} - Support", "description": "Support seekers", "color": "#F59E0B",
-              "enabled": True,
-              "rules": [{"type": "keyword_match", "keywords": ["help", "support", "broken"], "priority": 5}],
-              "llm_criteria": "Visitor needing help"}
-        r = await tenant_cli.post("/api/dashboard/visitor-profiles", json=p2)
-        pid2 = r.json().get("profile_id") if r.status_code in (200, 201) else None
-        ok("Create profile 2", f"id={pid2}") if pid2 else fail("Create profile 2", f"{r.status_code}: {r.text[:200]}")
-
-        if pid1:
-            r = await tenant_cli.put(f"/api/dashboard/visitor-profiles/{pid1}", json={"name": f"{TEST_PREFIX} - Enterprise (Updated)"})
-            ok("Update profile") if r.status_code == 200 else fail("Update", f"{r.status_code}: {r.text[:200]}")
-
-        # NOTE: No single-profile GET endpoint exists (only list/all)
-
-        r = await tenant_cli.get("/api/dashboard/visitor-profiles")
-        ok("List profiles (final)", f"count={len(r.json())}") if r.status_code == 200 else fail("List final", f"{r.status_code}")
-
-        r = await tenant_cli.get("/api/dashboard/visitor-profiles/stats")
-        ok("Profile stats") if r.status_code == 200 else fail("Stats", f"{r.status_code}: {r.text[:100]}")
-
-        # ── 5. Classification ─────────────────────────────────────
-        print("\n--- 5. Visitor Classification ---")
-
-        widget = fresh_widget()
-        sid = f"{TEST_PREFIX}_session_{uuid.uuid4().hex[:8]}"
-        r = await widget.post("/api/chat", json={"query": "I need help with your enterprise plan pricing", "session_id": sid, "current_url": "https://example.com", "current_page_title": "Test Page"})
-        if r.status_code in (200, 201):
-            ok("Chat triggers visitor creation", f"HTTP {r.status_code}")
-        else:
-            fail("Chat", f"HTTP {r.status_code}: {r.text[:300]}")
-            # Debug: check if api_key is valid
-            r2 = await widget.get("/api/widget/config", headers={"Authorization": f"Bearer {api_key}"})
-            if r2.status_code != 200:
-                fail("Chat debug", f"api_key invalid: {r2.status_code}: {r2.text[:200]}")
-            else:
-                fail("Chat debug", f"api_key valid but chat failed")
-        await asyncio.sleep(3)
-
-        r = await tenant_cli.get("/api/dashboard/visitors", params={"search": sid})
-        ok("List visitors by session") if r.status_code == 200 else fail("List visitors", f"{r.status_code}: {r.text[:100]}")
-
-        r = await tenant_cli.post(f"/api/dashboard/visitors/{sid}/reclassify")
-        ok("Reclassification", f"profile={r.json().get('profile_label', 'none')}") if r.status_code == 200 else fail("Reclassify", f"{r.status_code}: {r.text[:200]}")
-
-        if pid2:
-            r = await tenant_cli.put(f"/api/dashboard/visitors/{sid}/profile", json={"profile_id": pid2})
-            ok("Profile override") if r.status_code == 200 else fail("Override", f"{r.status_code}: {r.text[:200]}")
-            await tenant_cli.put(f"/api/dashboard/visitors/{sid}/profile", json={"profile_id": None})
-
-        # ── 6. Archival ───────────────────────────────────────────
-        print("\n--- 6. Conversation Archival ---")
+        # ── 4. Archival ───────────────────────────────────────────
+        print("\n--- 4. Conversation Archival ---")
 
         widget = fresh_widget()
         csid = f"{TEST_PREFIX}_conv_{uuid.uuid4().hex[:8]}"
@@ -282,8 +219,8 @@ async def main():
         else:
             fail("Search visitors", f"{r.status_code}: {r.text[:200]}")
 
-        # ── 7. Identity via Lead Form ─────────────────────────────
-        print("\n--- 7. Visitor Identity Capture ---")
+        # ── 5. Identity via Lead Form ─────────────────────────────
+        print("\n--- 5. Visitor Identity Capture ---")
 
         widget = fresh_widget()
         isid = f"{TEST_PREFIX}_id_{uuid.uuid4().hex[:8]}"
@@ -330,9 +267,9 @@ async def main():
             else:
                 fail("Greeting chat", f"{r.status_code}: {r.text[:200]}")
 
-        # ── 8. Identity CRUD ──────────────────────────────────────
+        # ── 6. Identity CRUD ──────────────────────────────────────
         # First create a visitor via chat, then test identity ops
-        print("\n--- 8. Identity CRUD ---")
+        print("\n--- 6. Identity CRUD ---")
         widget = fresh_widget()
         isid2 = f"{TEST_PREFIX}_crud_{uuid.uuid4().hex[:8]}"
         r = await widget.post("/api/chat", json={"query": "hello", "session_id": isid2, "current_url": "https://example.com", "current_page_title": "Test"})
@@ -349,18 +286,8 @@ async def main():
         r = await tenant_cli.delete(f"/api/dashboard/visitors/{isid2}/identity")
         ok("Clear identity") if r.status_code == 200 else fail("Clear identity", f"{r.status_code}: {r.text[:200]}")
 
-        # ── 9. Admin Profile Stats ────────────────────────────────
-        print("\n--- 9. Admin Profile Stats ---")
-        r = await tenant_cli.get("/api/tenants/me")
-        tid = r.json().get("tenant_id") if r.status_code == 200 else None
-        if tid:
-            r = await admin_cli.get(f"/api/admin/analytics/tenant/{tid}/profile-stats")
-            ok("Admin profile stats") if r.status_code == 200 else fail("Admin stats", f"{r.status_code}: {r.text[:200]}")
-        else:
-            fail("Admin stats", "no tenant_id")
-
-    # ── 10. Cleanup ────────────────────────────────────────────────
-    print("\n--- 10. Cleanup ---")
+    # ── 7. Cleanup ────────────────────────────────────────────────
+    print("\n--- 7. Cleanup ---")
     if mongodb_uri:
         try:
             mc4 = MotorClient(mongodb_uri, serverSelectionTimeoutMS=5000)

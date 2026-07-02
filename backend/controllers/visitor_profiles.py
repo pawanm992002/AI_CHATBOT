@@ -1,6 +1,4 @@
-import uuid
 from datetime import datetime, timezone
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -11,11 +9,9 @@ from models.visitor_profile import (
     VisitorProfileResponse,
 )
 from repositories.visitor_profile_repository import VisitorProfileRepository
-from services.visitor_profile_service import VisitorProfileService
 
 router = APIRouter(prefix="/dashboard", tags=["visitor-profiles"])
 _repo = VisitorProfileRepository()
-_service = VisitorProfileService()
 
 
 def _profile_to_response(p: dict) -> VisitorProfileResponse:
@@ -24,33 +20,12 @@ def _profile_to_response(p: dict) -> VisitorProfileResponse:
         tenant_id=p["tenant_id"],
         name=p["name"],
         description=p.get("description", ""),
+        response_instructions=p.get("response_instructions"),
         color=p.get("color", "#6366f1"),
-        rules=p.get("rules", []),
-        llm_criteria=p.get("llm_criteria"),
         enabled=p.get("enabled", True),
         created_at=p["created_at"],
         updated_at=p["updated_at"],
     )
-
-
-@router.get("/visitor-profiles/stats")
-async def profile_stats(current_tenant: dict = Depends(get_current_tenant)):
-    tenant_id = current_tenant["tenant_id"]
-    pipeline = [
-        {"$match": {"tenant_id": tenant_id, "profile_id": {"$ne": None}}},
-        {"$group": {"_id": "$profile_id", "label": {"$first": "$profile_label"}, "count": {"$sum": 1}}},
-        {"$sort": {"count": -1}},
-    ]
-    results = await db.visitors.aggregate(pipeline).to_list(100)
-    total = await db.visitors.count_documents({"tenant_id": tenant_id})
-    items = [
-        {"profile_id": r["_id"], "label": r.get("label"), "count": r["count"], "percentage": round(r["count"] / total * 100, 1) if total > 0 else 0}
-        for r in results
-    ]
-    unclassified = total - sum(r["count"] for r in results)
-    if unclassified > 0:
-        items.append({"profile_id": None, "label": "Unclassified", "count": unclassified, "percentage": round(unclassified / total * 100, 1) if total > 0 else 0})
-    return {"items": items, "total": total}
 
 
 @router.get("/visitor-profiles", response_model=list[VisitorProfileResponse])
@@ -103,9 +78,10 @@ async def delete_profile(
     if not ok:
         raise HTTPException(status_code=404, detail="Profile not found")
 
+    # Clear profile assignment from visitors
     await db.visitors.update_many(
         {"tenant_id": tenant_id, "profile_id": profile_id},
-        {"$set": {"profile_id": None, "profile_label": None, "profile_confidence": None}},
+        {"$set": {"profile_id": None, "profile_label": None}},
     )
     return {"status": "ok"}
 
@@ -114,16 +90,13 @@ async def delete_profile(
 async def list_visitors(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    profile_id: Optional[str] = None,
-    search: Optional[str] = None,
+    search: str | None = None,
     current_tenant: dict = Depends(get_current_tenant),
 ):
     tenant_id = current_tenant["tenant_id"]
     skip = (page - 1) * page_size
 
     query: dict = {"tenant_id": tenant_id}
-    if profile_id:
-        query["profile_id"] = profile_id
     if search:
         query["$or"] = [
             {"visitor_id": {"$regex": search, "$options": "i"}},
@@ -166,16 +139,6 @@ async def get_visitor(
     return {**visitor, "leads": leads}
 
 
-@router.post("/visitors/{visitor_id}/reclassify")
-async def reclassify_visitor(
-    visitor_id: str,
-    current_tenant: dict = Depends(get_current_tenant),
-):
-    tenant_id = current_tenant["tenant_id"]
-    await _service.classify_visitor(visitor_id, tenant_id, trigger="manual")
-    return {"status": "ok", "message": "Reclassification triggered"}
-
-
 @router.put("/visitors/{visitor_id}/profile")
 async def set_visitor_profile(
     visitor_id: str,
@@ -191,37 +154,13 @@ async def set_visitor_profile(
             raise HTTPException(status_code=404, detail="Profile not found")
         profile_label = profile["name"]
 
-    now = datetime.now(timezone.utc)
-    update: dict = {
-        "profile_id": profile_id,
-        "profile_label": profile_label,
-        "profile_confidence": 1.0 if profile_id else None,
-        "last_classified_at": now,
-    }
-
-    if profile_id:
-        await db.visitors.update_one(
-            {"visitor_id": visitor_id, "tenant_id": tenant_id},
-            {
-                "$set": update,
-                "$push": {
-                    "profile_history": {
-                        "profile_id": profile_id,
-                        "profile_label": profile_label,
-                        "assigned_at": now,
-                        "reason": payload.get("reason", "Manual override"),
-                        "source": "rule",
-                        "trigger": "manual",
-                    }
-                },
-            },
-        )
-    else:
-        await db.visitors.update_one(
-            {"visitor_id": visitor_id, "tenant_id": tenant_id},
-            {"$set": update},
-        )
-
+    await db.visitors.update_one(
+        {"visitor_id": visitor_id, "tenant_id": tenant_id},
+        {"$set": {
+            "profile_id": profile_id,
+            "profile_label": profile_label,
+        }},
+    )
     return {"status": "ok"}
 
 
