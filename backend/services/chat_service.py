@@ -556,9 +556,11 @@ class ChatService:
         """
         if tools:
             system_prompt += (
-                "\n\nWhen the user expresses intent to take a specific action "
-                "(enroll, book, apply, request a call back, etc.), use the show_enquiry_form tool "
-                "to show the most relevant form. Always include a brief text response alongside the tool call."
+                "\n\nYou have access to a show_enquiry_form tool to capture user details. "
+                "When the user expresses interest in taking an action (enroll, apply, book a demo, get a callback, etc.), "
+                "DO NOT immediately call the tool. Instead, ask the user a brief confirmation question "
+                "(e.g. 'Would you like me to show you the admission form?'). "
+                "Only call show_enquiry_form once the user explicitly confirms (says yes, haan, sure, proceed, etc.)."
             )
         api_messages = [{"role": "system", "content": system_prompt}] + messages[-MAX_HISTORY:]
         raw_llm = get_llm_raw(provider, model)
@@ -599,7 +601,7 @@ class ChatService:
                         break
 
         if show_form and not answer:
-            answer = "Let me get that for you!"
+            answer = "Sure! Please fill in the form below and we'll get back to you."
 
         return answer, show_form, form_id, usage
 
@@ -607,9 +609,11 @@ class ChatService:
         """Stream answer tokens with optional tool calling. Yields token strings, then a final dict."""
         if tools:
             system_prompt += (
-                "\n\nWhen the user expresses intent to take a specific action "
-                "(enroll, book, apply, request a call back, etc.), use the show_enquiry_form tool "
-                "to show the most relevant form. Always include a brief text response alongside the tool call."
+                "\n\nYou have access to a show_enquiry_form tool to capture user details. "
+                "When the user expresses interest in taking an action (enroll, apply, book a demo, get a callback, etc.), "
+                "DO NOT immediately call the tool. Instead, ask the user a brief confirmation question "
+                "(e.g. 'Would you like me to show you the admission form?'). "
+                "Only call show_enquiry_form once the user explicitly confirms (says yes, haan, sure, proceed, etc.)."
             )
         api_messages = [{"role": "system", "content": system_prompt}] + messages[-MAX_HISTORY:]
         raw_llm = get_llm_raw(provider, model)
@@ -683,7 +687,7 @@ class ChatService:
                     pass
 
         if show_form and not full_answer:
-            fallback = "Let me get that for you!"
+            fallback = "Sure! Please fill in the form below and we'll get back to you."
             full_answer = fallback
             yield fallback
 
@@ -858,22 +862,28 @@ class ChatService:
 
     def _build_sources(self, chunks: list[dict]) -> list[ChatSource]:
         sources = []
-        seen_sources = set()
+        seen_urls: set[str] = set()
+        seen_labels: set[str] = set()
         for c in chunks:
             url = c.get("url", "")
             if not url.startswith("http://") and not url.startswith("https://"):
                 continue
             section_title = c.get("section_title")
             section_path = c.get("section_path")
+            # Primary dedup key: exact (url, section_path)
             source_key = (url, section_path or section_title or "")
-            if source_key not in seen_sources:
+            # Secondary dedup: same display label already shown (avoids 3× same title)
+            display_label = (section_title or c.get("title") or "").strip()
+            if source_key not in seen_urls and display_label not in seen_labels:
                 sources.append(ChatSource(
                     url=url,
                     title=c.get("title") or "Relevant Page",
                     section_title=section_title,
                     section_path=section_path,
                 ))
-                seen_sources.add(source_key)
+                seen_urls.add(source_key)
+                if display_label:
+                    seen_labels.add(display_label)
         return sources
 
     def _format_context_chunk(self, chunk: dict) -> str:

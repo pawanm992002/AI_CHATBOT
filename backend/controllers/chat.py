@@ -110,7 +110,7 @@ async def chat(
         if not valid_form or not valid_form.get("enabled", True):
             result.show_enquiry_form = False
             result.enquiry_form_id = ""
-            if result.answer == "Let me get that for you!":
+            if result.answer == "Sure! Please fill in the form below and we'll get back to you.":
                 result.answer = "Let me help you with that."
 
     return ChatResponse(
@@ -248,7 +248,7 @@ async def websocket_chat(websocket: WebSocket, key_hash: str = Query(...)):
                 else:
                     result.show_enquiry_form = False
                     result.enquiry_form_id = ""
-                    if result.answer == "Let me get that for you!":
+                    if result.answer == "Sure! Please fill in the form below and we'll get back to you.":
                         result.answer = "Let me help you with that."
             await websocket.send_json({"type": "done", "message_id": result.message_id, "answer": result.answer})
 
