@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo, CSSProperties } from 'react';
-import { submitEnquiry, getWidgetConfig, submitFeedback, apiClient, LeadFormConfig } from './api';
+import { submitEnquiry, getWidgetConfig, submitFeedback, getVisitorProfile, apiClient, LeadFormConfig } from './api';
 import { WidgetProps, Message, useIsMobile, useStyleInjection } from '@chatbot/shared';
 import { getPalette } from './utils/theme';
 import { useHostTheme } from './hooks/useHostTheme';
@@ -47,6 +47,7 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
   const [showSources, setShowSources] = useState<boolean>(true);
   const [leadFormConfig, setLeadFormConfig] = useState<LeadFormConfig | null>(null);
   const [isDisabled, setIsDisabled] = useState(false);
+  const [profileColor, setProfileColor] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -84,6 +85,21 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
       }
     };
     fetchConfig();
+  }, [apiKey]);
+
+  useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        const visitorId = getVisitorId();
+        const profile = await getVisitorProfile(visitorId);
+        if (profile?.profile_color) {
+          setProfileColor(profile.profile_color);
+        }
+      } catch {
+        // Visitor may not have a profile yet — silent
+      }
+    };
+    if (apiKey) fetchProfile();
   }, [apiKey]);
 
   // Persist chat history on updates
@@ -263,6 +279,10 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
             });
             ws.onmessage = originalOnMessage;
             setIsLoading(false);
+            // Re-fetch visitor profile in case classification just happened
+            getVisitorProfile(getVisitorId()).then(p => {
+              if (p?.profile_color) setProfileColor(p.profile_color);
+            }).catch(() => {});
             break;
 
           case 'error':
@@ -433,7 +453,7 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
             )}
 
             {/* Header */}
-            <Header palette={palette} onClose={() => setIsOpen(false)} onNewSession={handleNewSession} />
+            <Header palette={palette} onClose={() => setIsOpen(false)} onNewSession={handleNewSession} profileColor={profileColor} />
 
             {/* Messages area */}
             {isDisabled ? (

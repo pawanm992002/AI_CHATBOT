@@ -4,9 +4,10 @@ interface HeaderProps {
   palette: Palette;
   onClose: () => void;
   onNewSession: () => void;
+  profileColor?: string | null;
 }
 
-export function Header({ palette, onClose, onNewSession }: HeaderProps) {
+export function Header({ palette, onClose, onNewSession, profileColor }: HeaderProps) {
   return (
     <div 
       className="px-5 py-4 flex justify-between items-center shrink-0"
@@ -28,6 +29,13 @@ export function Header({ palette, onClose, onNewSession }: HeaderProps) {
         </div>
       </div>
       <div className="flex items-center gap-2">
+        {profileColor && (
+          <div
+            className="w-3 h-3 rounded-full shrink-0"
+            style={{ backgroundColor: profileColor }}
+            title="Visitor profile recognized"
+          />
+        )}
         <button
           onClick={onNewSession}
           aria-label="New Chat"
