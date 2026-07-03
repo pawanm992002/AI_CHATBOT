@@ -2,6 +2,8 @@ from datetime import datetime, timezone
 import json
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel
+from typing import Optional
 from core.auth import db, verify_api_key
 from core.config import settings
 from models.requests import ChatRequest, FeedbackRequest
@@ -13,6 +15,11 @@ from repositories.lead_repository import LeadFormConfigRepository
 router = APIRouter(tags=["chat"])
 chat_service = ChatService()
 _form_config_repo = LeadFormConfigRepository()
+
+
+class VisitorProfileResponse(BaseModel):
+    profile_label: Optional[str] = None
+    profile_color: Optional[str] = None
 
 
 def _client_ip(request: Request) -> str:
@@ -50,6 +57,32 @@ async def get_widget_config(current_tenant: dict = Depends(verify_api_key)):
         "show_sources": current_tenant.get("show_sources", True),
         "lead_form": lead_form,
     }
+
+
+@router.get("/widget/visitor-profile", response_model=VisitorProfileResponse)
+async def get_visitor_profile(
+    visitor_id: str = Query(...),
+    current_tenant: dict = Depends(verify_api_key),
+):
+    tenant_id = current_tenant["tenant_id"]
+    visitor = await db.visitors.find_one(
+        {"visitor_id": visitor_id, "tenant_id": tenant_id},
+        {"profile_id": 1, "profile_label": 1},
+    )
+    if not visitor or not visitor.get("profile_id"):
+        return VisitorProfileResponse()
+
+    profile = await db.visitor_profiles.find_one(
+        {"profile_id": visitor["profile_id"], "tenant_id": tenant_id},
+        {"name": 1, "color": 1},
+    )
+    if not profile:
+        return VisitorProfileResponse()
+
+    return VisitorProfileResponse(
+        profile_label=profile.get("name"),
+        profile_color=profile.get("color", "#6366f1"),
+    )
 
 
 @router.post("/chat", response_model=ChatResponse)

@@ -25,6 +25,11 @@ export interface WidgetConfig {
   lead_form?: LeadFormConfig | null;
 }
 
+export interface VisitorProfile {
+  profile_label?: string | null;
+  profile_color?: string | null;
+}
+
 export interface EnquiryData {
   form_id?: string;
   name?: string;
@@ -202,6 +207,12 @@ class ApiClient {
       body: JSON.stringify({ message_id: messageId, session_id: sessionId, rating, visitor_id: visitorId }),
     });
   }
+
+  public getVisitorProfile(visitorId: string): Promise<VisitorProfile> {
+    return this.request<VisitorProfile>(`/widget/visitor-profile?visitor_id=${encodeURIComponent(visitorId)}`, {
+      method: "GET",
+    });
+  }
 }
 
 export const apiClient = new ApiClient();
@@ -217,3 +228,6 @@ export const getLeadFormById = (formId: string) =>
 
 export const submitFeedback = (messageId: string, sessionId: string, rating: 'like' | 'dislike', visitorId?: string) =>
   apiClient.submitFeedback(messageId, sessionId, rating, visitorId);
+
+export const getVisitorProfile = (visitorId: string) =>
+  apiClient.getVisitorProfile(visitorId);
