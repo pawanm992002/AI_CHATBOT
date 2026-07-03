@@ -634,6 +634,10 @@ class ChatService:
             "latency_ms": 0.0, "status": "success",
         }
 
+        # Buffer to clean first-token hallucinations (common LLM issue)
+        _first_token_buffer = ""
+        _first_token_yielded = False
+
         start = time.perf_counter()
         try:
             async for chunk in llm_with_tools.astream(lc_messages):
@@ -650,7 +654,18 @@ class ChatService:
                     continue
                 if chunk.content and isinstance(chunk.content, str):
                     full_answer += chunk.content
-                    yield chunk.content
+                    if not _first_token_yielded:
+                        _first_token_buffer += chunk.content
+                        if len(_first_token_buffer) >= 3:
+                            # Clean common first-token artifacts
+                            cleaned = _first_token_buffer.lstrip().lstrip(".,:;!? ").lstrip()
+                            if cleaned != _first_token_buffer:
+                                _first_token_buffer = cleaned
+                            yield _first_token_buffer
+                            _first_token_yielded = True
+                            _first_token_buffer = ""
+                    else:
+                        yield chunk.content
                 for tc_chunk in (getattr(chunk, "tool_call_chunks", None) or []):
                     idx: int = tc_chunk.get("index", 0)  # type: ignore[assignment]
                     if tc_chunk.get("name"):
@@ -668,11 +683,21 @@ class ChatService:
             usage["latency_ms"] = round(latency_ms, 1)
             usage["status"] = "error"
             usage["error"] = str(e)[:200]
+            # Flush any buffered first token
+            if _first_token_buffer and not _first_token_yielded:
+                cleaned = _first_token_buffer.lstrip().lstrip(".,:;!? ").lstrip()
+                yield cleaned
             yield {"answer": full_answer, "show_form": False, "form_id": "", "usage": usage}
             return
 
         if usage["latency_ms"] == 0.0:
             usage["latency_ms"] = round((time.perf_counter() - start) * 1000, 1)
+
+        # Flush any buffered first token for very short responses
+        if _first_token_buffer and not _first_token_yielded:
+            cleaned = _first_token_buffer.lstrip().lstrip(".,:;!? ").lstrip()
+            yield cleaned
+            _first_token_yielded = True
 
         show_form = False
         form_id = ""
