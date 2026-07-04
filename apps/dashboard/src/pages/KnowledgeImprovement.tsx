@@ -185,9 +185,9 @@ const KnowledgeImprovement = () => {
                 All Types
               </button>
               <button
-                onClick={() => setGapType('no_context')}
+                onClick={() => setGapType('knowledge_gap')}
                 className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                  gapType === 'no_context' 
+                  gapType === 'knowledge_gap' 
                     ? 'bg-rose-600 text-white shadow-sm' 
                     : 'text-slate-400 hover:text-white hover:bg-slate-800'
                 }`}

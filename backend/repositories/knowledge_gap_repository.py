@@ -11,9 +11,17 @@ async def _vector_search_gaps(
     query_vector: list[float],
     threshold: float = 0.85,
     limit: int = 5,
+    gap_type: str | None = None,
 ) -> list[Dict[str, Any]]:
     """Find similar open knowledge gaps using MongoDB Atlas vector search."""
     try:
+        search_filter: dict[str, Any] = {
+            "tenant_id": tenant_id,
+            "status": "open",
+        }
+        if gap_type:
+            search_filter["gap_type"] = gap_type
+
         pipeline = [
             {
                 "$vectorSearch": {
@@ -22,10 +30,7 @@ async def _vector_search_gaps(
                     "queryVector": query_vector,
                     "numCandidates": max(limit * 10, 100),
                     "limit": limit,
-                    "filter": {
-                        "tenant_id": tenant_id,
-                        "status": "open",
-                    },
+                    "filter": search_filter,
                 }
             },
             {"$addFields": {"score": {"$meta": "vectorSearchScore"}}},

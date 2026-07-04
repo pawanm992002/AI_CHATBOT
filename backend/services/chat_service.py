@@ -849,7 +849,7 @@ class ChatService:
             best_match = None
             best_similarity = 0.0
 
-            results = await _vector_search_gaps(tenant_id, embedding, threshold=0.85, limit=5)
+            results = await _vector_search_gaps(tenant_id, embedding, threshold=0.85, limit=5, gap_type=gap_type)
             for gap in results:
                 score = gap.get("score", 0)
                 if score > best_similarity:
