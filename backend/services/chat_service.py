@@ -600,7 +600,7 @@ class ChatService:
                         form_id = args["form_id"]
                         break
 
-        if show_form and not answer:
+        if show_form:
             answer = "Sure! Please fill in the form below and we'll get back to you."
 
         return answer, show_form, form_id, usage
@@ -711,10 +711,11 @@ class ChatService:
                 except (json.JSONDecodeError, KeyError):
                     pass
 
-        if show_form and not full_answer:
+        if show_form:
             fallback = "Sure! Please fill in the form below and we'll get back to you."
-            full_answer = fallback
-            yield fallback
+            if full_answer != fallback:
+                full_answer = fallback
+                yield fallback
 
         yield {"answer": full_answer, "show_form": show_form, "form_id": form_id, "usage": usage}
 
