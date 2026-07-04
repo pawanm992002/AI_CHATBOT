@@ -79,6 +79,14 @@ class ChatService:
         return provider, model
 
     @staticmethod
+    def _assistant_message(content: str, usage: dict[str, Any], show_form: bool = False, form_id: str = "") -> dict:
+        message = {"role": "assistant", "content": content, "usage": usage}
+        if show_form and form_id:
+            message["show_enquiry_form"] = True
+            message["enquiry_form_id"] = form_id
+        return message
+
+    @staticmethod
     def _build_form_tool(forms: list[dict]) -> dict:
         """Build OpenAI tool schema for form routing from tenant's form configs."""
         form_ids = sorted([f["form_id"] for f in forms if f.get("form_id")])
@@ -152,7 +160,7 @@ class ChatService:
             forms = await _form_config_repo.get_all_enabled_for_tenant(tenant_id)
             tool_schema = self._build_form_tool(forms) if forms else None
             answer, show_form, form_id, usage = await self._complete_answer(system_prompt, messages, provider, model, tools=[tool_schema] if tool_schema else None, forms=forms)
-            messages.append({"role": "assistant", "content": answer, "usage": usage})
+            messages.append(self._assistant_message(answer, usage, show_form, form_id))
             summary, messages = await self._compact_if_needed(summary, messages, provider, model)
             await self._persist_conversation(turn, summary, messages)
             await self._track_visitor_message(turn.session_id, turn.visitor_id or turn.session_id, turn.tenant["tenant_id"])
@@ -241,7 +249,7 @@ class ChatService:
             forms = await _form_config_repo.get_all_enabled_for_tenant(tenant_id)
             tool_schema = self._build_form_tool(forms) if forms else None
             answer, show_form, form_id, usage = await self._complete_answer(system_prompt, messages, provider, model, tools=[tool_schema] if tool_schema else None, forms=forms)
-            messages.append({"role": "assistant", "content": answer, "usage": usage})
+            messages.append(self._assistant_message(answer, usage, show_form, form_id))
             summary, messages = await self._compact_if_needed(summary, messages, provider, model)
             await self._persist_conversation(turn, summary, messages)
             await self._track_visitor_message(turn.session_id, turn.visitor_id or turn.session_id, turn.tenant["tenant_id"])
@@ -322,7 +330,7 @@ class ChatService:
                 full_answer += item
                 await on_token(item)
 
-        messages.append({"role": "assistant", "content": full_answer, "usage": usage})
+        messages.append(self._assistant_message(full_answer, usage, show_form, form_id))
         summary, messages = await self._compact_if_needed(summary, messages, tenant_ai_provider, tenant_ai_model)
         await self._persist_conversation(turn, summary, messages)
         await self._track_visitor_message(turn.session_id, turn.visitor_id or turn.session_id, turn.tenant["tenant_id"])
@@ -381,7 +389,7 @@ class ChatService:
                 full_answer += item
                 await on_token(item)
 
-        messages.append({"role": "assistant", "content": full_answer, "usage": usage})
+        messages.append(self._assistant_message(full_answer, usage, show_form, form_id))
         summary, messages = await self._compact_if_needed(summary, messages, tenant_ai_provider, tenant_ai_model)
         await self._persist_conversation(turn, summary, messages)
         await self._track_visitor_message(turn.session_id, turn.visitor_id or turn.session_id, turn.tenant["tenant_id"])
@@ -410,7 +418,7 @@ class ChatService:
         tool_schema = self._build_form_tool(forms) if forms else None
 
         answer, show_form, form_id, usage = await self._complete_answer(system_prompt, messages, tenant_ai_provider, tenant_ai_model, tools=[tool_schema] if tool_schema else None, forms=forms)
-        messages.append({"role": "assistant", "content": answer, "usage": usage})
+        messages.append(self._assistant_message(answer, usage, show_form, form_id))
 
         summary, messages = await self._compact_if_needed(summary, messages, tenant_ai_provider, tenant_ai_model)
         await self._persist_conversation(turn, summary, messages)
@@ -463,7 +471,7 @@ class ChatService:
         tool_schema = self._build_form_tool(forms) if forms else None
 
         answer, show_form, form_id, usage = await self._complete_answer(system_prompt, messages, tenant_ai_provider, tenant_ai_model, tools=[tool_schema] if tool_schema else None, forms=forms)
-        messages.append({"role": "assistant", "content": answer, "usage": usage})
+        messages.append(self._assistant_message(answer, usage, show_form, form_id))
 
         summary, messages = await self._compact_if_needed(summary, messages, tenant_ai_provider, tenant_ai_model)
         await self._persist_conversation(turn, summary, messages)
@@ -557,10 +565,11 @@ class ChatService:
         if tools:
             system_prompt += (
                 "\n\nYou have access to a show_enquiry_form tool to capture user details. "
-                "When the user expresses interest in taking an action (enroll, apply, book a demo, get a callback, etc.), "
-                "DO NOT immediately call the tool. Instead, ask the user a brief confirmation question "
-                "(e.g. 'Would you like me to show you the admission form?'). "
-                "Only call show_enquiry_form once the user explicitly confirms (says yes, haan, sure, proceed, etc.)."
+                "When the user's intent matches an active form's trigger instructions, prioritize that form. "
+                "Before asking for confirmation, give a brief helpful response to the user's actual question. "
+                "For guidance, comparison, confusion, or next-step questions, provide a concise practical framework first. "
+                "Do NOT immediately call the tool. Ask a brief confirmation question in the user's language. "
+                "Only call show_enquiry_form once the user explicitly confirms."
             )
         api_messages = [{"role": "system", "content": system_prompt}] + messages[-MAX_HISTORY:]
         raw_llm = get_llm_raw(provider, model)
@@ -600,7 +609,7 @@ class ChatService:
                         form_id = args["form_id"]
                         break
 
-        if show_form:
+        if show_form and not answer.strip():
             answer = "Sure! Please fill in the form below and we'll get back to you."
 
         return answer, show_form, form_id, usage
@@ -610,10 +619,11 @@ class ChatService:
         if tools:
             system_prompt += (
                 "\n\nYou have access to a show_enquiry_form tool to capture user details. "
-                "When the user expresses interest in taking an action (enroll, apply, book a demo, get a callback, etc.), "
-                "DO NOT immediately call the tool. Instead, ask the user a brief confirmation question "
-                "(e.g. 'Would you like me to show you the admission form?'). "
-                "Only call show_enquiry_form once the user explicitly confirms (says yes, haan, sure, proceed, etc.)."
+                "When the user's intent matches an active form's trigger instructions, prioritize that form. "
+                "Before asking for confirmation, give a brief helpful response to the user's actual question. "
+                "For guidance, comparison, confusion, or next-step questions, provide a concise practical framework first. "
+                "Do NOT immediately call the tool. Ask a brief confirmation question in the user's language. "
+                "Only call show_enquiry_form once the user explicitly confirms."
             )
         api_messages = [{"role": "system", "content": system_prompt}] + messages[-MAX_HISTORY:]
         raw_llm = get_llm_raw(provider, model)
@@ -711,11 +721,10 @@ class ChatService:
                 except (json.JSONDecodeError, KeyError):
                     pass
 
-        if show_form:
+        if show_form and not full_answer.strip():
             fallback = "Sure! Please fill in the form below and we'll get back to you."
-            if full_answer != fallback:
-                full_answer = fallback
-                yield fallback
+            full_answer = fallback
+            yield fallback
 
         yield {"answer": full_answer, "show_form": show_form, "form_id": form_id, "usage": usage}
 

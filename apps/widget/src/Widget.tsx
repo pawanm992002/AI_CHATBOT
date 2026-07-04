@@ -46,6 +46,7 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
   const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([]);
   const [showSources, setShowSources] = useState<boolean>(true);
   const [leadFormConfig, setLeadFormConfig] = useState<LeadFormConfig | null>(null);
+  const [leadFormConfigsById, setLeadFormConfigsById] = useState<Record<string, LeadFormConfig>>({});
   const [isDisabled, setIsDisabled] = useState(false);
   const [profileColor, setProfileColor] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -75,7 +76,12 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
           setShowSources(config.show_sources);
         }
         if (config?.lead_form) {
-          setLeadFormConfig(config.lead_form);
+          const leadForm = config.lead_form;
+          setLeadFormConfig(leadForm);
+          setLeadFormConfigsById(prev => ({
+            ...prev,
+            [leadForm.form_id]: leadForm,
+          }));
         }
       } catch (err: any) {
         console.error("Failed to fetch widget config", err);
@@ -261,7 +267,12 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
             });
             if (data.form_id) {
               apiClient.getLeadFormById(data.form_id).then(form => {
-                if (form) setLeadFormConfig(form);
+                if (form) {
+                  setLeadFormConfigsById(prev => ({
+                    ...prev,
+                    [form.form_id]: form,
+                  }));
+                }
               }).catch(() => {});
             }
             break;
@@ -490,6 +501,7 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
                       onEnquirySubmit={handleEnquirySubmit}
                       showSources={showSources}
                       leadFormConfig={leadFormConfig}
+                      leadFormConfigsById={leadFormConfigsById}
                     />
                   </ErrorBoundary>
 
