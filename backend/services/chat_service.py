@@ -79,6 +79,14 @@ class ChatService:
         return provider, model
 
     @staticmethod
+    def _assistant_message(content: str, usage: dict[str, Any], show_form: bool = False, form_id: str = "") -> dict:
+        message = {"role": "assistant", "content": content, "usage": usage}
+        if show_form and form_id:
+            message["show_enquiry_form"] = True
+            message["enquiry_form_id"] = form_id
+        return message
+
+    @staticmethod
     def _build_form_tool(forms: list[dict]) -> dict:
         """Build OpenAI tool schema for form routing from tenant's form configs."""
         form_ids = sorted([f["form_id"] for f in forms if f.get("form_id")])
@@ -152,7 +160,7 @@ class ChatService:
             forms = await _form_config_repo.get_all_enabled_for_tenant(tenant_id)
             tool_schema = self._build_form_tool(forms) if forms else None
             answer, show_form, form_id, usage = await self._complete_answer(system_prompt, messages, provider, model, tools=[tool_schema] if tool_schema else None, forms=forms)
-            messages.append({"role": "assistant", "content": answer, "usage": usage})
+            messages.append(self._assistant_message(answer, usage, show_form, form_id))
             summary, messages = await self._compact_if_needed(summary, messages, provider, model)
             await self._persist_conversation(turn, summary, messages)
             await self._track_visitor_message(turn.session_id, turn.visitor_id or turn.session_id, turn.tenant["tenant_id"])
@@ -241,7 +249,7 @@ class ChatService:
             forms = await _form_config_repo.get_all_enabled_for_tenant(tenant_id)
             tool_schema = self._build_form_tool(forms) if forms else None
             answer, show_form, form_id, usage = await self._complete_answer(system_prompt, messages, provider, model, tools=[tool_schema] if tool_schema else None, forms=forms)
-            messages.append({"role": "assistant", "content": answer, "usage": usage})
+            messages.append(self._assistant_message(answer, usage, show_form, form_id))
             summary, messages = await self._compact_if_needed(summary, messages, provider, model)
             await self._persist_conversation(turn, summary, messages)
             await self._track_visitor_message(turn.session_id, turn.visitor_id or turn.session_id, turn.tenant["tenant_id"])
@@ -322,7 +330,7 @@ class ChatService:
                 full_answer += item
                 await on_token(item)
 
-        messages.append({"role": "assistant", "content": full_answer, "usage": usage})
+        messages.append(self._assistant_message(full_answer, usage, show_form, form_id))
         summary, messages = await self._compact_if_needed(summary, messages, tenant_ai_provider, tenant_ai_model)
         await self._persist_conversation(turn, summary, messages)
         await self._track_visitor_message(turn.session_id, turn.visitor_id or turn.session_id, turn.tenant["tenant_id"])
@@ -381,7 +389,7 @@ class ChatService:
                 full_answer += item
                 await on_token(item)
 
-        messages.append({"role": "assistant", "content": full_answer, "usage": usage})
+        messages.append(self._assistant_message(full_answer, usage, show_form, form_id))
         summary, messages = await self._compact_if_needed(summary, messages, tenant_ai_provider, tenant_ai_model)
         await self._persist_conversation(turn, summary, messages)
         await self._track_visitor_message(turn.session_id, turn.visitor_id or turn.session_id, turn.tenant["tenant_id"])
@@ -410,7 +418,7 @@ class ChatService:
         tool_schema = self._build_form_tool(forms) if forms else None
 
         answer, show_form, form_id, usage = await self._complete_answer(system_prompt, messages, tenant_ai_provider, tenant_ai_model, tools=[tool_schema] if tool_schema else None, forms=forms)
-        messages.append({"role": "assistant", "content": answer, "usage": usage})
+        messages.append(self._assistant_message(answer, usage, show_form, form_id))
 
         summary, messages = await self._compact_if_needed(summary, messages, tenant_ai_provider, tenant_ai_model)
         await self._persist_conversation(turn, summary, messages)
@@ -463,7 +471,7 @@ class ChatService:
         tool_schema = self._build_form_tool(forms) if forms else None
 
         answer, show_form, form_id, usage = await self._complete_answer(system_prompt, messages, tenant_ai_provider, tenant_ai_model, tools=[tool_schema] if tool_schema else None, forms=forms)
-        messages.append({"role": "assistant", "content": answer, "usage": usage})
+        messages.append(self._assistant_message(answer, usage, show_form, form_id))
 
         summary, messages = await self._compact_if_needed(summary, messages, tenant_ai_provider, tenant_ai_model)
         await self._persist_conversation(turn, summary, messages)

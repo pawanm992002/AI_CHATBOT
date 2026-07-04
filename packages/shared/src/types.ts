@@ -65,3 +65,27 @@ export interface LeadFormConfig {
   created_at: string;
   updated_at: string;
 }
+
+export interface WidgetProps {
+  apiKey: string;
+  apiBaseUrl?: string;
+}
+
+export interface ChatSource {
+  url: string;
+  title: string;
+  section_title?: string | null;
+  section_path?: string | null;
+}
+
+export interface Message {
+  role: 'user' | 'assistant';
+  content: string;
+  isStreaming?: boolean;
+  messageId?: string;
+  sources?: ChatSource[];
+  showEnquiryForm?: boolean;
+  enquiryFormId?: string;
+  enquirySubmitted?: boolean;
+  feedback?: 'like' | 'dislike' | null;
+}

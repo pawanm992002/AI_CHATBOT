@@ -18,6 +18,7 @@ interface MessageListProps {
   onEnquirySubmit: (msgIndex: number, formData: { custom_fields: Record<string, string>; form_id?: string }) => void;
   showSources: boolean;
   leadFormConfig: LeadFormConfig | null;
+  leadFormConfigsById: Record<string, LeadFormConfig>;
 }
 
 export function MessageList({
@@ -31,6 +32,7 @@ export function MessageList({
   onEnquirySubmit,
   showSources,
   leadFormConfig,
+  leadFormConfigsById,
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -274,16 +276,33 @@ export function MessageList({
           )}
 
           {/* Enquiry form */}
-          {m.showEnquiryForm && !m.enquirySubmitted && (
-            <ErrorBoundary>
-              <EnquiryForm
-                accent={accent}
-                palette={palette}
-                formConfig={leadFormConfig}
-                onSubmit={(formData) => onEnquirySubmit(i, formData)}
-              />
-            </ErrorBoundary>
-          )}
+          {m.showEnquiryForm && !m.enquirySubmitted && (() => {
+            const formConfig = m.enquiryFormId
+              ? leadFormConfigsById[m.enquiryFormId]
+              : leadFormConfig;
+
+            if (m.enquiryFormId && !formConfig) {
+              return (
+                <div
+                  className="mt-2.5 pt-2.5 text-[12px]"
+                  style={{ borderTop: `1px solid ${palette.divider}`, color: palette.subtleText }}
+                >
+                  Loading form...
+                </div>
+              );
+            }
+
+            return (
+              <ErrorBoundary>
+                <EnquiryForm
+                  accent={accent}
+                  palette={palette}
+                  formConfig={formConfig}
+                  onSubmit={(formData) => onEnquirySubmit(i, formData)}
+                />
+              </ErrorBoundary>
+            );
+          })()}
 
           {/* Enquiry submitted confirmation */}
           {m.showEnquiryForm && m.enquirySubmitted && (
