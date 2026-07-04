@@ -269,11 +269,31 @@ const Settings = () => {
           </p>
 
           {/* Auto suggestions */}
-          {autoQuestions.length > 0 && (
-            <div className="space-y-2.5">
+          <div className="space-y-2.5">
+            <div className="flex items-center justify-between">
               <span className="text-xxs font-bold text-slate-500 uppercase tracking-wider block">
                 Auto-generated from content
               </span>
+              <button
+                onClick={async () => {
+                  if (!isEditor) {
+                    triggerRbacError("You do not have Editor permissions to regenerate questions.");
+                    return;
+                  }
+                  try {
+                    await privateAxios.post('/tenants/suggested-questions/regenerate');
+                    alert('Regeneration started. Refresh in a few seconds to see new questions.');
+                  } catch (err) {
+                    console.error(err);
+                  }
+                }}
+                className="flex items-center gap-1 px-2 py-1 text-xxs font-semibold text-violet-400 hover:text-violet-300 transition-colors cursor-pointer"
+              >
+                <RotateCw size={12} />
+                <span>Regenerate</span>
+              </button>
+            </div>
+            {autoQuestions.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
                 {autoQuestions.map((q, idx) => (
                   <span 
@@ -284,8 +304,8 @@ const Settings = () => {
                   </span>
                 ))}
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* Manual questions manager */}
           <div className="space-y-4 pt-4 border-t border-slate-800">

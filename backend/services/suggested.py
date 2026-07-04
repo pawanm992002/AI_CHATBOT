@@ -46,8 +46,10 @@ async def generate_suggested_questions(tenant_id: str):
                     "role": "system",
                     "content": (
                         f"You generate suggested questions for a website chatbot on {domain}. "
-                        "Based on the website content below, generate exactly 6 short questions "
+                        "Based ONLY on the website content below, generate exactly 6 short questions "
                         "that a visitor might ask. Mix different topics. "
+                        "IMPORTANT: Only generate questions that can be directly answered using the provided content. "
+                        "Do NOT generate questions about topics not covered in the content. "
                         "Reply ONLY with a JSON array of strings, no explanation. "
                         "Example: [\"What services do you offer?\", \"How much does it cost?\"]"
                     ),

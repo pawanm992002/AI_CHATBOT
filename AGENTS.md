@@ -75,12 +75,7 @@ uv sync
 ```bash
 # Widget locally
 open backend/templates/test_page.html
-
-# End-to-end integration test (requires server running)
-python test_e2e.py
 ```
-
-The e2e test creates a tenant, approves it, tests visitor profiles, chat, conversation archival, lead form identity sync, and visitor identity CRUD — then cleans up test data. Run against `http://127.0.0.1:8000`.
 
 ## Code Conventions
 
@@ -93,6 +88,9 @@ The e2e test creates a tenant, approves it, tests visitor profiles, chat, conver
 - Schema validation enforced on startup via JSON Schema in `core/schema_validator.py`
 - Profile classification happens inline via the query rewrite LLM call (zero added latency) — no background sweep, persistent at the visitor level across all sessions
 - All visitor/conversation queries must include `tenant_id` alongside `visitor_id` or `session_id` for multi-tenant isolation
+- Language mirroring: the chatbot detects the user's language and replies in the same language (Hinglish, Hindi, English) via `_LANGUAGE_RULE` constant in chat prompts
+- First-token buffering: the streaming pipeline buffers the first token to strip leading hallucinated artifacts (stray punctuation, markdown fragments) before streaming to the widget
+- Explicit enquiry form confirmation: when the LLM triggers a lead form, the backend streams the text response first, then asks the visitor to confirm before rendering the form
 - Archival Triggers:
   1) **Over-limit active turn compression**: moves oldest turns to DO Spaces if a single session exceeds 60 messages.
   2) **Session completion trigger**: fully archives previous sessions to DO Spaces in the background when a visitor initializes a new chat session.
@@ -107,6 +105,7 @@ The e2e test creates a tenant, approves it, tests visitor profiles, chat, conver
 
 ### Git
 - `master` is the production branch (triggers EC2 deploy via GitHub Actions)
+- `staging` is the staging branch (triggers separate EC2 deploy to staging environment on port 8001)
 - Write concise commit messages matching repo style
 - Never commit `.env` files or secrets
 
@@ -125,8 +124,17 @@ The e2e test creates a tenant, approves it, tests visitor profiles, chat, conver
 | `backend/services/admin_analytics_service.py` | MongoDB aggregation pipelines for platform-wide analytics (overview, timeseries, per-tenant, model leaderboard) |
 | `backend/services/archival_service.py` | Hot/cold conversation storage — archives old turns (>40 msgs) to DO Spaces, `_pending` set prevents concurrent archival per conversation |
 | `backend/services/visitor_profile_service.py` | Real-time profile classification (inline via rewrite LLM call), profile context injection into system prompt |
+| `backend/services/storage.py` | DigitalOcean Spaces upload/delete utility (S3-compatible) for PDF storage and conversation archival |
+| `backend/services/pdf_parser.py` | PDF text extraction via PyMuPDF (fitz), page-by-page markdown formatting |
+| `backend/config/models.json` | LLM model catalog — 20 models across 3 providers (OpenAI, Groq, OpenRouter) |
+| `backend/repositories/knowledge_gap_repository.py` | CRUD for knowledge gaps with vector similarity deduplication |
+| `backend/repositories/feedback_repository.py` | CRUD for message feedback (like/dislike) |
+| `backend/repositories/source_repository.py` | CRUD for knowledge sources |
+| `backend/repositories/source_job_repository.py` | Indexing job tracking (crawl, pdf_index, faq_index, text_index) |
+| `backend/repositories/text_doc_repository.py` | CRUD for text documents |
 | `backend/core/rate_limiter.py` | Redis-based sliding window rate limiter (per-IP, per-tenant, per-session) |
 | `apps/widget/src/components/ErrorBoundary.tsx` | React error boundary preventing widget crashes from killing WebSocket |
+| `apps/widget/src/components/EnquiryForm.tsx` | Dynamic lead form component rendered via LLM tool calling |
 | `backend/core/schema_validator.py` | MongoDB JSON schema validators (18 collections) |
 | `apps/widget/src/Widget.tsx` | Main widget component (WebSocket streaming) |
 | `apps/widget/src/index.tsx` | Widget bootstrapper (reads `data-api-key` from script tag) |
@@ -141,7 +149,6 @@ The e2e test creates a tenant, approves it, tests visitor profiles, chat, conver
 | `backend/controllers/visitor_profiles.py` | Dashboard JWT-authenticated routes for profile CRUD, visitor identity management |
 | `backend/controllers/conversations.py` | Dashboard JWT-authenticated conversation detail + full history (merges DO Spaces archive) endpoints |
 | `packages/shared/src/types.ts` | Shared TypeScript interfaces (includes VisitorProfile, Visitor, LeadFormField with field_role) |
-| `test_e2e.py` | End-to-end integration test (requires running server)
 
 ## Database Collections
 
@@ -158,8 +165,7 @@ Copy `.env.production.example` to `.env` and fill in:
 - `ALLOWED_ORIGINS` — Comma-separated allowed CORS origins
 - `GROQ_API_KEY` — Groq API key (optional, for Groq provider)
 - `OPENROUTER_API_KEY` — OpenRouter API key (optional, for OpenRouter provider)
-- `DO_SPACES_KEY` — DigitalOcean Spaces access key (for PDF storage + conversation archival)
-- `DO_SPACES_SECRET` — DigitalOcean Spaces secret key
+- `DO_SPACES_ACCESS_KEY` — DigitalOcean Spaces access key (for PDF storage + conversation archival)
+- `DO_SPACES_SECRET_KEY` — DigitalOcean Spaces secret key
 - `DO_SPACES_ENDPOINT` — DigitalOcean Spaces endpoint URL (e.g. https://nyc3.digitaloceanspaces.com)
 - `DO_SPACES_BUCKET` — DigitalOcean Spaces bucket name
-- `DO_SPACES_REGION` — DigitalOcean Spaces region (e.g. nyc3)

@@ -1,3 +1,4 @@
+import asyncio
 import os
 import string
 import json
@@ -7,6 +8,7 @@ from models.requests import TenantRegisterRequest, TenantLoginRequest, Suggested
 from views.responses import TokenResponse, TenantResponse
 from core.auth import db, get_password_hash, verify_password, create_access_token, get_current_tenant, set_auth_cookie, clear_auth_cookie, hash_api_key
 from repositories.tenant_repository import TenantRepository
+from services.suggested import generate_suggested_questions
 import uuid
 import secrets
 from datetime import datetime, timezone
@@ -266,6 +268,12 @@ async def get_stats(current_tenant: dict = Depends(get_current_tenant)):
 async def update_suggested_questions(req: SuggestedQuestionsUpdateRequest, current_tenant: dict = Depends(get_current_tenant)):
     await tenant_repo.update(current_tenant["tenant_id"], {"suggested_questions_manual": req.questions})
     return {"status": "ok", "questions": req.questions}
+
+@router.post("/suggested-questions/regenerate")
+async def regenerate_suggested_questions(current_tenant: dict = Depends(get_current_tenant)):
+    tenant_id = current_tenant["tenant_id"]
+    asyncio.create_task(generate_suggested_questions(tenant_id))
+    return {"status": "ok", "message": "Regeneration started"}
 
 @router.get("/analytics/feedback")
 async def get_feedback_analytics(current_tenant: dict = Depends(get_current_tenant)):

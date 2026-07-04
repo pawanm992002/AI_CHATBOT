@@ -166,7 +166,7 @@ flowchart TD
 - Firecrawl API Key
 
 ## 1. Setup Environment
-Use `.env.production.example` as the template:
+Use `.env.production.example` (production) or `.env.staging.example` (staging) as the template:
 
 ```bash
 cp .env.production.example .env
@@ -189,13 +189,16 @@ COOKIE_SECURE=False
 COOKIE_SAMESITE=lax
 ENFORCE_DOMAIN=False
 
-# Dashboard build config
-VITE_API_BASE_URL=http://localhost:8000
-
 # Optional
 APP_ENV=development
 MAX_CRAWL_PAGES=100
 PUBLIC_URL=
+
+# DigitalOcean Spaces (S3-compatible) — for PDF storage + conversation archival
+DO_SPACES_BUCKET=your-bucket-name
+DO_SPACES_ACCESS_KEY=your-access-key
+DO_SPACES_SECRET_KEY=your-secret-key
+DO_SPACES_ENDPOINT=https://your-region.digitaloceanspaces.com
 
 # LLM Providers (optional — enables multi-provider support)
 GROQ_API_KEY=gsk_your-groq-api-key-here
@@ -811,6 +814,9 @@ Tenants can define profiles (e.g. "Student", "Teacher", "Parent") with a name, d
 ### Dashboard
 Navigate to **Visitor Profiles** in the sidebar to manage profiles — create, edit, toggle enabled, or delete. Each profile's response instructions tell the AI how to tailor its answers for that visitor type.
 
+### Widget Integration
+When a visitor is classified into a profile, the widget header displays a small colored dot (using the profile's `color` badge) next to the "AI Assistant" title. This provides a visual indicator to the visitor that the system recognizes them. The profile color is fetched via `GET /widget/config` and passed through to the `Header` component.
+
 Three layers of rate limiting protect the chat endpoint:
 
 | Layer | Scope | Limit | Mechanism | Purpose |
@@ -892,6 +898,15 @@ Vector search scores above 0.5 return a RAG answer directly. Below 0.5, the quer
 
 ### Empty Context Guard
 If search returns zero results for a non-greeting query, the system classifies the query and returns an appropriate response — without calling GPT-4o for a RAG answer — preventing hallucination.
+
+### Language Mirroring
+The chatbot detects the language of the user's message and replies in the same language. If a user writes in Hindi or Hinglish (e.g., "mujhe admission chahiye"), the response is in Hinglish. If the user writes in English, the response is in English. This is enforced via a constant (`_LANGUAGE_RULE`) injected into all response prompts, overriding the knowledge base language.
+
+### First-Token Buffering
+The streaming chat pipeline buffers the first token of each LLM response to strip leading hallucinated artifacts (e.g., stray punctuation, markdown fragments, or role prefixes that some models emit). The buffer holds the first token and checks for common patterns — if it matches an artifact, it is discarded before streaming begins. This prevents visual glitches in the widget without affecting response content.
+
+### Explicit Enquiry Form Confirmation
+When the LLM decides to show an enquiry form (via tool calling), the backend does not immediately send the form to the widget. Instead, it streams the LLM's text response first, then sends a confirmation message asking the visitor if they want to fill in the form. Only after the visitor clicks "Yes" does the widget render the form. This prevents abrupt interruptions and gives visitors control over when to share their details.
 
 ## Authentication
 
@@ -1047,6 +1062,31 @@ The embeddable chat widget (`apps/widget/`) is built as a self-executing IIFE bu
 - **Theme auto-detection** — Reads CSS variables (`--primary`, `--accent`) from host page
 - **Dark/light mode** — Auto-detects from host page attributes, classes, or background luminance
 - **Responsive** — Full-screen bottom sheet on mobile, floating panel on desktop
+
+## Staging Environment
+
+A separate staging environment mirrors production for pre-release testing.
+
+### Setup
+- Copy `.env.staging.example` to `.env.staging` and fill in staging-specific values
+- Uses a separate MongoDB database (`chatbot_db_staging`) and Redis namespace
+- Staging backend runs on port `8001` via PM2 (`ai-chatbot-backend-staging`)
+- Staging domain: `chatbot-staging.acadiq.ai`
+
+### Deployment
+- Push to `staging` branch triggers GitHub Actions deploy to EC2
+- Workflow: `.github/workflows/deploy-staging.yml`
+- Nginx routes `chatbot-staging.acadiq.ai` to port 8001
+- Health check: `curl -sf http://localhost:8001/health`
+
+### Differences from Production
+| Aspect | Production | Staging |
+|---|---|---|
+| Branch | `master` | `staging` |
+| PM2 process | `ai-chatbot-backend` | `ai-chatbot-backend-staging` |
+| Port | 8000 | 8001 |
+| Domain | `chatbot.acadiq.ai` | `chatbot-staging.acadiq.ai` |
+| Database | `chatbot_db_production` | `chatbot_db_staging` |
 
 ## Tech Stack
 
