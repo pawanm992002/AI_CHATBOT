@@ -47,7 +47,11 @@ const TimeSeriesChart = ({
               axisLine={false}
               tickFormatter={(v: string) => {
                 const d = new Date(v);
-                return `${d.getMonth() + 1}/${d.getDate()}`;
+                return d.toLocaleDateString('en-IN', {
+                  month: 'numeric',
+                  day: 'numeric',
+                  timeZone: 'Asia/Kolkata',
+                });
               }}
             />
             <YAxis
@@ -67,10 +71,11 @@ const TimeSeriesChart = ({
               }}
               labelFormatter={(label: string) => {
                 const d = new Date(label);
-                return d.toLocaleDateString('en-US', {
+                return d.toLocaleDateString('en-IN', {
                   month: 'short',
                   day: 'numeric',
                   year: 'numeric',
+                  timeZone: 'Asia/Kolkata',
                 });
               }}
               formatter={(value: number) => [formatValue(value), title]}
