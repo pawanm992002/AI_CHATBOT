@@ -136,21 +136,20 @@ async def chat(
         )
     )
 
-    if result.show_enquiry_form and result.enquiry_form_id:
+    if result.suggested_form_id:
         valid_form = await _form_config_repo.get_by_form_id(
-            current_tenant["tenant_id"], result.enquiry_form_id
+            current_tenant["tenant_id"], result.suggested_form_id
         )
         if not valid_form or not valid_form.get("enabled", True):
-            result.show_enquiry_form = False
-            result.enquiry_form_id = ""
-            result.answer = " "
+            result.suggested_form_id = ""
+            result.suggested_form_title = ""
 
     return ChatResponse(
         message_id=result.message_id,
         answer=result.answer,
         sources=result.sources,
-        show_enquiry_form=result.show_enquiry_form,
-        enquiry_form_id=result.enquiry_form_id,
+        suggested_form_id=result.suggested_form_id,
+        suggested_form_title=result.suggested_form_title,
     )
 
 
@@ -271,16 +270,19 @@ async def websocket_chat(websocket: WebSocket, key_hash: str = Query(...)):
                     "data": [source.model_dump() for source in result.sources],
                 })
 
-            if result.show_enquiry_form and result.enquiry_form_id:
+            if result.suggested_form_id:
                 valid_form = await _form_config_repo.get_by_form_id(
-                    tenant["tenant_id"], result.enquiry_form_id
+                    tenant["tenant_id"], result.suggested_form_id
                 )
                 if valid_form and valid_form.get("enabled", True):
-                    await websocket.send_json({"type": "enquiry_form", "form_id": result.enquiry_form_id})
+                    await websocket.send_json({
+                        "type": "suggested_form",
+                        "form_id": result.suggested_form_id,
+                        "form_title": result.suggested_form_title,
+                    })
                 else:
-                    result.show_enquiry_form = False
-                    result.enquiry_form_id = ""
-                    result.answer = " "
+                    result.suggested_form_id = ""
+                    result.suggested_form_title = ""
             await websocket.send_json({"type": "done", "message_id": result.message_id, "answer": result.answer})
 
     except WebSocketDisconnect:

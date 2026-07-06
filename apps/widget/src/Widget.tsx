@@ -141,10 +141,10 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
     };
   }, []);
 
-  const clearEnquiryForms = useCallback(() => {
+  const clearSuggestedForms = useCallback(() => {
     setMessages(prev => prev.map(m => {
-      if (m.role === 'assistant' && m.showEnquiryForm && !m.enquirySubmitted) {
-        return { ...m, showEnquiryForm: false };
+      if (m.role === 'assistant' && m.suggestedFormId) {
+        return { ...m, suggestedFormId: undefined, suggestedFormTitle: undefined };
       }
       return m;
     }));
@@ -208,7 +208,7 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
   const handleSend = useCallback(async (text: string) => {
     if (!text.trim()) return;
 
-    clearEnquiryForms();
+    clearSuggestedForms();
 
     const userMsg: Message = { role: 'user', content: text };
     setMessages(prev => [...prev, userMsg]);
@@ -219,8 +219,6 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
       role: 'assistant',
       content: '',
       isStreaming: true,
-      enquirySubmitted: false,
-      feedback: null,
     }]);
 
     try {
@@ -256,12 +254,12 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
             });
             break;
 
-          case 'enquiry_form':
+          case 'suggested_form':
             setMessages(prev => {
               const updated = [...prev];
               const idx = updated.length - 1;
               if (updated[idx].role === 'assistant') {
-                updated[idx] = { ...updated[idx], showEnquiryForm: true, enquiryFormId: data.form_id || '' };
+                updated[idx] = { ...updated[idx], suggestedFormId: data.form_id || '', suggestedFormTitle: data.form_title || '' };
               }
               return updated;
             });
@@ -352,7 +350,7 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
       });
       setIsLoading(false);
     }
-  }, [clearEnquiryForms, getWs]);
+  }, [clearSuggestedForms, getWs]);
 
   const handleEnquirySubmit = useCallback(async (msgIndex: number, formData: { custom_fields: Record<string, string>; form_id?: string }) => {
     const contextMessages = messages.slice(Math.max(0, msgIndex - 5), msgIndex + 1);
@@ -370,7 +368,7 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
       });
 
       setMessages(prev => prev.map((m, i) =>
-        i === msgIndex ? { ...m, enquirySubmitted: true } : m
+        i === msgIndex ? { ...m, suggestedFormId: undefined, suggestedFormTitle: undefined } : m
       ));
     } catch (error) {
       console.error("Enquiry submit error:", error);

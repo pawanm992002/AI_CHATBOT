@@ -41,8 +41,8 @@ class ChatResponse(BaseModel):
     message_id: str
     answer: str
     sources: List[ChatSource]
-    show_enquiry_form: bool = False
-    enquiry_form_id: str = ""
+    suggested_form_id: str = ""
+    suggested_form_title: str = ""
 
 
 class WidgetConfigResponse(BaseModel):
