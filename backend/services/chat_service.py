@@ -10,7 +10,7 @@ import time
 from core.auth import db
 from core.redis import redis_client, get_redis_key
 from services.embedder import embed_text
-from services.llm.factory import get_llm, get_llm_raw, _to_lc_messages, extract_usage
+from services.llm.factory import get_llm, extract_usage
 from services.llm.pricing import calculate_cost
 from services.vector_search import search_chunks
 from repositories.knowledge_gap_repository import _vector_search_gaps
@@ -87,61 +87,26 @@ class ChatService:
         return message
 
     @staticmethod
-    def _get_last_suggested_form(messages: list[dict]) -> tuple[str, str]:
-        """Extract (form_id, form_title) from the most recent assistant message that suggested a form."""
-        for msg in reversed(messages):
-            if msg.get("role") == "assistant" and msg.get("suggested_form_id"):
-                return msg["suggested_form_id"], msg.get("suggested_form_title", "")
-        return "", ""
-
-    @staticmethod
-    def _build_form_tool(forms: list[dict]) -> dict:
-        """Build OpenAI tool schema for form suggestion from tenant's form configs."""
-        form_ids = sorted([f["form_id"] for f in forms if f.get("form_id")])
-        if not form_ids:
-            return {}
-        form_descriptions = []
+    def _build_form_matching_prompt(forms: list[dict]) -> str:
+        form_lines = []
         for f in forms:
             fid = f.get("form_id", "")
             title = f.get("title", "Contact Form")
             trigger = f.get("trigger_instructions", "").strip()
             if fid:
                 if trigger:
-                    desc = f'"{title}" — EXCLUSIVE MATCH: {trigger}'
+                    form_lines.append(f'- "{title}" (form_id: "{fid}") — MATCH: {trigger}')
                 else:
-                    desc = f'"{title}"'
-                form_descriptions.append(desc)
-        forms_list = "\n".join(f"  - {d}" for d in form_descriptions)
-
-        return {
-            "type": "function",
-            "function": {
-                "name": "suggest_form",
-                    "description": (
-                    "Suggest a lead capture form that matches the user's intent. "
-                    "Call this whenever the user's message relates to an available form — "
-                    "even if phrased as a question. Keywords: enrollment, demo, callback, "
-                    "scholarship, application, pricing, contact, admission, brochure, "
-                    "register, book a seat, counselling, fees, etc.\n\n"
-                    "If the user asks about ANY topic that has a matching form below, "
-                    "call this tool alongside your normal answer. "
-                    "The tool call will add a clickable button the user can press to open "
-                    "the form — it does NOT replace your answer.\n\n"
-                    f"Available forms:\n{forms_list}"
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "form_id": {
-                            "type": "string",
-                            "description": "The ID of the matching form",
-                            "enum": form_ids,
-                        }
-                    },
-                    "required": ["form_id"],
-                },
-            },
-        }
+                    form_lines.append(f'- "{title}" (form_id: "{fid}")')
+        if not form_lines:
+            return ""
+        lines = [
+            "\n\nFORM MATCHING — If the user's intent matches a form below, "
+            "append [FORM:form_id] at the very end of your response. "
+            "Only append it if the intent clearly matches. Otherwise respond normally.",
+        ]
+        lines.extend(form_lines)
+        return "\n".join(lines)
 
     async def handle_message(self, turn: ChatTurnInput) -> ChatTurnResult:
         return await self._process_turn(turn, stream=False, on_token=None)
@@ -173,7 +138,7 @@ class ChatService:
         if classification == QueryClass.OUT_OF_SCOPE:
             return await self._handle_out_of_scope(turn, summary, messages, business_name, provider, model, tenant_id, stream, on_token)
 
-        search_query, profiles, profile_name = await self._prepare_search(turn, summary, messages, provider, model, tenant_id)
+        search_query, profiles, profile_name, form_id, form_title = await self._prepare_search(turn, summary, messages, provider, model, tenant_id)
 
         chunks, top_score = await self._search_chunks(tenant_id, search_query)
 
@@ -183,12 +148,12 @@ class ChatService:
 
         if not chunks:
             if stream:
-                return await self._handle_no_chunks_stream(turn, summary, messages, classification, on_token)
-            return await self._handle_no_chunks(turn, summary, messages, classification)
+                return await self._handle_no_chunks_stream(turn, summary, messages, classification, form_id, form_title, on_token)
+            return await self._handle_no_chunks(turn, summary, messages, classification, form_id, form_title)
 
         if stream:
-            return await self._handle_answer_with_chunks_stream(turn, summary, messages, chunks, True, on_token)
-        return await self._handle_answer_with_chunks(turn, summary, messages, chunks, True)
+            return await self._handle_answer_with_chunks_stream(turn, summary, messages, chunks, True, form_id, form_title, on_token)
+        return await self._handle_answer_with_chunks(turn, summary, messages, chunks, True, form_id, form_title)
 
     async def _handle_greeting(self, turn: ChatTurnInput, business_name: str, tenant_id: str) -> ChatTurnResult:
         visitor_name = await self._get_visitor_name(turn.visitor_id or turn.session_id, tenant_id)
@@ -213,39 +178,31 @@ class ChatService:
     ) -> ChatTurnResult:
         messages.append({"role": "user", "content": turn.query})
         system_prompt = prompts.NO_MATCH_OUT_OF_SCOPE_PROMPT.format(business_name=business_name)
-        forms = await _form_config_repo.get_all_enabled_for_tenant(tenant_id)
-        tool_schema = self._build_form_tool(forms) if forms else None
 
         if stream:
             full_answer = ""
-            form_id = ""
-            form_title = ""
             usage: dict[str, Any] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "reasoning_tokens": 0, "cached_tokens": 0, "provider": provider, "model": model, "latency_ms": 0.0, "status": "success"}
-            async for item in self._complete_answer_stream(system_prompt, messages, provider, model, tools=[tool_schema] if tool_schema else None, forms=forms):
+            async for item in self._complete_answer_stream(system_prompt, messages, provider, model):
                 if isinstance(item, dict):
                     full_answer = item["answer"]
-                    form_id = item.get("form_id", "")
-                    form_title = item.get("form_title", "")
                     usage = item.get("usage", usage)
                 else:
                     full_answer += item
                     await on_token(item)
-            messages.append(self._assistant_message(full_answer, usage, form_id, form_title))
+            messages.append(self._assistant_message(full_answer, usage))
             summary, messages = await self._compact_if_needed(summary, messages, provider, model)
             await self._persist_conversation(turn, summary, messages)
             await self._track_visitor_message(turn.session_id, turn.visitor_id or turn.session_id, turn.tenant["tenant_id"])
-            if not form_id:
-                await self._log_knowledge_gap(tenant_id, turn.query, turn.current_url, "out_of_scope", turn.message_id)
-            return ChatTurnResult(message_id=turn.message_id, answer=full_answer, sources=[], suggested_form_id=form_id, suggested_form_title=form_title)
+            await self._log_knowledge_gap(tenant_id, turn.query, turn.current_url, "out_of_scope", turn.message_id)
+            return ChatTurnResult(message_id=turn.message_id, answer=full_answer, sources=[])
 
-        answer, form_id, form_title, usage = await self._complete_answer(system_prompt, messages, provider, model, tools=[tool_schema] if tool_schema else None, forms=forms)
-        messages.append(self._assistant_message(answer, usage, form_id, form_title))
+        answer, usage = await self._complete_answer(system_prompt, messages, provider, model)
+        messages.append(self._assistant_message(answer, usage))
         summary, messages = await self._compact_if_needed(summary, messages, provider, model)
         await self._persist_conversation(turn, summary, messages)
         await self._track_visitor_message(turn.session_id, turn.visitor_id or turn.session_id, turn.tenant["tenant_id"])
-        if not form_id:
-            await self._log_knowledge_gap(tenant_id, turn.query, turn.current_url, "out_of_scope", turn.message_id)
-        return ChatTurnResult(message_id=turn.message_id, answer=answer, sources=[], suggested_form_id=form_id, suggested_form_title=form_title)
+        await self._log_knowledge_gap(tenant_id, turn.query, turn.current_url, "out_of_scope", turn.message_id)
+        return ChatTurnResult(message_id=turn.message_id, answer=answer, sources=[])
 
     async def _prepare_search(
         self,
@@ -255,7 +212,7 @@ class ChatService:
         provider: str,
         model: str,
         tenant_id: str,
-    ) -> tuple[str, list[dict] | None, str | None]:
+    ) -> tuple[str, list[dict] | None, str | None, str, str]:
         # Profile classification: fetch profiles if visitor hasn't been classified yet
         profiles = None
         profile_name = None
@@ -270,10 +227,13 @@ class ChatService:
         except Exception:
             profiles = None
 
+        # Fetch forms for intent matching (piggyback on rewrite call)
+        forms = await _form_config_repo.get_all_enabled_for_tenant(tenant_id)
+
         # Every non-greeting, non-out-of-scope message goes through the LLM
         # rewrite step, which resolves entities/pronouns/follow-ups from
-        # conversation history into the search query.
-        search_query, profile_name = await self._rewrite_search_query(turn.query, summary, messages, provider, model, profiles=profiles)
+        # conversation history into the search query, and matches form intent.
+        search_query, profile_name, form_id, form_title = await self._rewrite_search_query(turn.query, summary, messages, provider, model, profiles=profiles, forms=forms)
 
         # If profile was identified, classify the visitor
         if profile_name and profiles:
@@ -282,8 +242,8 @@ class ChatService:
             except Exception as e:
                 print(f"[CHAT] Profile classification failed: {e}")
 
-        print(f"[CHAT] query='{turn.query}' search_query='{search_query}'")
-        return search_query, profiles, profile_name
+        print(f"[CHAT] query='{turn.query}' search_query='{search_query}' form_id='{form_id}'")
+        return search_query, profiles, profile_name, form_id, form_title
 
     async def _search_chunks(self, tenant_id: str, search_query: str) -> tuple[list[dict], float]:
         chunks = []
@@ -299,7 +259,7 @@ class ChatService:
             print(f"[CHAT] top score: {top_score:.4f}")
         return chunks, top_score
 
-    async def _handle_no_chunks_stream(self, turn, summary, messages, classification, on_token):
+    async def _handle_no_chunks_stream(self, turn, summary, messages, classification, form_id, form_title, on_token):
         """Streaming version of _handle_no_chunks."""
         tenant_id = turn.tenant["tenant_id"]
         business_name = turn.tenant.get("business_name") or turn.tenant["domain"]
@@ -311,18 +271,11 @@ class ChatService:
         messages.append({"role": "user", "content": turn.query})
         system_prompt = await self._build_no_match_prompt(turn, summary, messages, gap_type)
 
-        forms = await _form_config_repo.get_all_enabled_for_tenant(tenant_id)
-        tool_schema = self._build_form_tool(forms) if forms else None
-
         full_answer = ""
-        form_id = ""
-        form_title = ""
         usage: dict[str, Any] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "reasoning_tokens": 0, "cached_tokens": 0, "provider": tenant_ai_provider, "model": tenant_ai_model, "latency_ms": 0.0, "status": "success"}
-        async for item in self._complete_answer_stream(system_prompt, messages, tenant_ai_provider, tenant_ai_model, tools=[tool_schema] if tool_schema else None, forms=forms):
+        async for item in self._complete_answer_stream(system_prompt, messages, tenant_ai_provider, tenant_ai_model):
             if isinstance(item, dict):
                 full_answer = item["answer"]
-                form_id = item.get("form_id", "")
-                form_title = item.get("form_title", "")
                 usage = item.get("usage", usage)
             else:
                 full_answer += item
@@ -337,7 +290,7 @@ class ChatService:
 
         return ChatTurnResult(message_id=turn.message_id, answer=full_answer, sources=[], suggested_form_id=form_id, suggested_form_title=form_title)
 
-    async def _handle_answer_with_chunks_stream(self, turn, summary, messages, chunks, needs_search, on_token):
+    async def _handle_answer_with_chunks_stream(self, turn, summary, messages, chunks, needs_search, form_id, form_title, on_token):
         """Streaming version of _handle_answer_with_chunks."""
         tenant_id = turn.tenant["tenant_id"]
         business_name = turn.tenant.get("business_name") or turn.tenant["domain"]
@@ -370,18 +323,11 @@ class ChatService:
         messages.append({"role": "user", "content": turn.query})
         tenant_ai_provider, tenant_ai_model = self._tenant_llm_provider_model(turn.tenant)
 
-        forms = await _form_config_repo.get_all_enabled_for_tenant(turn.tenant["tenant_id"])
-        tool_schema = self._build_form_tool(forms) if forms else None
-
         full_answer = ""
-        form_id = ""
-        form_title = ""
         usage: dict[str, Any] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "reasoning_tokens": 0, "cached_tokens": 0, "provider": tenant_ai_provider, "model": tenant_ai_model, "latency_ms": 0.0, "status": "success"}
-        async for item in self._complete_answer_stream(system_prompt, messages, tenant_ai_provider, tenant_ai_model, tools=[tool_schema] if tool_schema else None, forms=forms):
+        async for item in self._complete_answer_stream(system_prompt, messages, tenant_ai_provider, tenant_ai_model):
             if isinstance(item, dict):
                 full_answer = item["answer"]
-                form_id = item.get("form_id", "")
-                form_title = item.get("form_title", "")
                 usage = item.get("usage", usage)
             else:
                 full_answer += item
@@ -400,6 +346,8 @@ class ChatService:
         summary: str,
         messages: list[dict],
         classification: QueryClass,
+        form_id: str,
+        form_title: str,
     ) -> ChatTurnResult:
         tenant_id = turn.tenant["tenant_id"]
         business_name = turn.tenant.get("business_name") or turn.tenant["domain"]
@@ -412,10 +360,7 @@ class ChatService:
         messages.append({"role": "user", "content": turn.query})
         system_prompt = await self._build_no_match_prompt(turn, summary, messages, gap_type)
 
-        forms = await _form_config_repo.get_all_enabled_for_tenant(tenant_id)
-        tool_schema = self._build_form_tool(forms) if forms else None
-
-        answer, form_id, form_title, usage = await self._complete_answer(system_prompt, messages, tenant_ai_provider, tenant_ai_model, tools=[tool_schema] if tool_schema else None, forms=forms)
+        answer, usage = await self._complete_answer(system_prompt, messages, tenant_ai_provider, tenant_ai_model)
         messages.append(self._assistant_message(answer, usage, form_id, form_title))
 
         summary, messages = await self._compact_if_needed(summary, messages, tenant_ai_provider, tenant_ai_model)
@@ -433,6 +378,8 @@ class ChatService:
         messages: list[dict],
         chunks: list[dict],
         needs_search: bool,
+        form_id: str,
+        form_title: str,
     ) -> ChatTurnResult:
         tenant_id = turn.tenant["tenant_id"]
         business_name = turn.tenant.get("business_name") or turn.tenant["domain"]
@@ -465,10 +412,7 @@ class ChatService:
         messages.append({"role": "user", "content": turn.query})
         tenant_ai_provider, tenant_ai_model = self._tenant_llm_provider_model(turn.tenant)
 
-        forms = await _form_config_repo.get_all_enabled_for_tenant(turn.tenant["tenant_id"])
-        tool_schema = self._build_form_tool(forms) if forms else None
-
-        answer, form_id, form_title, usage = await self._complete_answer(system_prompt, messages, tenant_ai_provider, tenant_ai_model, tools=[tool_schema] if tool_schema else None, forms=forms)
+        answer, usage = await self._complete_answer(system_prompt, messages, tenant_ai_provider, tenant_ai_model)
         messages.append(self._assistant_message(answer, usage, form_id, form_title))
 
         summary, messages = await self._compact_if_needed(summary, messages, tenant_ai_provider, tenant_ai_model)
@@ -500,7 +444,7 @@ class ChatService:
         except Exception:
             return QueryClass.PROCEED
 
-    async def _rewrite_search_query(self, query: str, summary: str, messages: list[dict], provider: str = "openai", model: str = "gpt-4o-mini", profiles: list[dict] | None = None) -> tuple[str, str | None]:
+    async def _rewrite_search_query(self, query: str, summary: str, messages: list[dict], provider: str = "openai", model: str = "gpt-4o-mini", profiles: list[dict] | None = None, forms: list[dict] | None = None) -> tuple[str, str | None, str, str]:
         conversation_text = self._recent_conversation_text(summary, messages)
         user_prompt = f"Latest user message: {query.strip()}"
         if conversation_text:
@@ -512,6 +456,8 @@ class ChatService:
         system_content = prompts.QUERY_REWRITE_PROMPT
         if profiles:
             system_content += build_profile_classification_prompt(profiles)
+        if forms:
+            system_content += self._build_form_matching_prompt(forms)
 
         try:
             llm = get_llm(provider, model)
@@ -523,10 +469,24 @@ class ChatService:
             )
             response_text = (resp.content or "").strip()
             profile_name = parse_profile_from_rewrite_response(response_text, profiles or [])
+
+            form_id = ""
+            form_title = ""
+            m = re.search(r'\[FORM:\s*([^\]]+)\]', response_text)
+            if m:
+                form_id = m.group(1).strip()
+                if forms and form_id:
+                    matched = next((f for f in forms if f.get("form_id") == form_id), None)
+                    if matched:
+                        form_title = matched.get("title", "")
+                    else:
+                        form_id = ""
+                response_text = re.sub(r'\s*\[FORM:[^\]]+\]', '', response_text).strip()
+
             rewritten = response_text.split("\n")[0].strip() if "\n" in response_text else response_text
-            return (rewritten if rewritten and len(rewritten) <= 240 else query.strip()), profile_name
+            return (rewritten if rewritten and len(rewritten) <= 240 else query.strip()), profile_name, form_id, form_title
         except Exception:
-            return query.strip(), None
+            return query.strip(), None, "", ""
 
     async def _build_no_match_prompt(self, turn: ChatTurnInput, summary: str, messages: list[dict], gap_type: str) -> str:
         business_name = turn.tenant.get("business_name") or turn.tenant["domain"]
@@ -555,22 +515,13 @@ class ChatService:
             prompt += f"\n\nHere is a summary of the conversation so far:\n{summary}"
         return prompt
 
-    async def _complete_answer(self, system_prompt: str, messages: list[dict], provider: str = "openai", model: str = "gpt-4o", tools: list[dict] | None = None, forms: list[dict] | None = None) -> tuple[str, str, str, dict[str, Any]]:
-        """Non-streaming LLM call with optional tool calling for form suggestion.
-
-        Returns (answer, form_id, form_title, usage_dict).
-        """
+    async def _complete_answer(self, system_prompt: str, messages: list[dict], provider: str = "openai", model: str = "gpt-4o") -> tuple[str, dict[str, Any]]:
         api_messages = [{"role": "system", "content": system_prompt}] + messages[-MAX_HISTORY:]
-        raw_llm = get_llm_raw(provider, model)
-        lc_messages = _to_lc_messages(api_messages)
+        llm = get_llm(provider, model)
 
         start = time.perf_counter()
         try:
-            if tools:
-                llm_with_tools = raw_llm.bind_tools(tools, tool_choice="auto")
-                response = await llm_with_tools.ainvoke(lc_messages)
-            else:
-                response = await raw_llm.ainvoke(lc_messages)
+            response = await llm.ainvoke(api_messages)
             latency_ms = (time.perf_counter() - start) * 1000
         except Exception as e:
             latency_ms = (time.perf_counter() - start) * 1000
@@ -581,42 +532,18 @@ class ChatService:
                 "latency_ms": round(latency_ms, 1),
                 "status": "error", "error": str(e)[:200],
             }
-            return "", "", "", usage
+            return "", usage
 
         usage = extract_usage(response, provider, model, latency_ms)
-
         content = response.content
         answer: str = content if isinstance(content, str) else ""
-        form_id = ""
-        form_title = ""
-        if hasattr(response, "tool_calls") and response.tool_calls:
-            for tc in response.tool_calls:
-                if tc.get("name") == "suggest_form":
-                    args = tc.get("args") or {}
-                    if args.get("form_id"):
-                        form_id = args["form_id"]
-                        if forms:
-                            matched = next((f for f in forms if f.get("form_id") == form_id), None)
-                            if matched:
-                                form_title = matched.get("title", "")
-                        break
+        return answer, usage
 
-        return answer, form_id, form_title, usage
-
-    async def _complete_answer_stream(self, system_prompt: str, messages: list[dict], provider: str = "openai", model: str = "gpt-4o", tools: list[dict] | None = None, forms: list[dict] | None = None):
-        """Stream answer tokens with optional tool calling. Yields token strings, then a final dict."""
+    async def _complete_answer_stream(self, system_prompt: str, messages: list[dict], provider: str = "openai", model: str = "gpt-4o"):
         api_messages = [{"role": "system", "content": system_prompt}] + messages[-MAX_HISTORY:]
-        raw_llm = get_llm_raw(provider, model)
-        lc_messages = _to_lc_messages(api_messages)
-
-        if tools:
-            llm_with_tools = raw_llm.bind_tools(tools, tool_choice="auto")
-        else:
-            llm_with_tools = raw_llm
+        llm = get_llm(provider, model)
 
         full_answer = ""
-        tool_call_args_by_index: dict[int, str] = {}
-        tool_call_names: dict[int, str] = {}
         usage: dict[str, Any] = {
             "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
             "reasoning_tokens": 0, "cached_tokens": 0,
@@ -630,7 +557,7 @@ class ChatService:
 
         start = time.perf_counter()
         try:
-            async for chunk in llm_with_tools.astream(lc_messages):
+            async for chunk in llm.astream(api_messages):
                 if isinstance(chunk, dict) and "usage" in chunk:
                     # Final usage dict from _LLMWrapper.astream
                     stream_usage = chunk["usage"]
@@ -656,12 +583,6 @@ class ChatService:
                             _first_token_buffer = ""
                     else:
                         yield chunk.content
-                for tc_chunk in (getattr(chunk, "tool_call_chunks", None) or []):
-                    idx: int = tc_chunk.get("index", 0)  # type: ignore[assignment]
-                    if tc_chunk.get("name"):
-                        tool_call_names[idx] = tc_chunk["name"]
-                    if tc_chunk.get("args"):
-                        tool_call_args_by_index[idx] = tool_call_args_by_index.get(idx, "") + tc_chunk["args"]
                 # Capture usage from streaming chunks
                 usage_meta = getattr(chunk, "usage_metadata", None)
                 if usage_meta:
@@ -677,7 +598,7 @@ class ChatService:
             if _first_token_buffer and not _first_token_yielded:
                 cleaned = _first_token_buffer.lstrip().lstrip(".,:;!? ").lstrip()
                 yield cleaned
-            yield {"answer": full_answer, "form_id": "", "form_title": "", "usage": usage}
+            yield {"answer": full_answer, "usage": usage}
             return
 
         if usage["latency_ms"] == 0.0:
@@ -689,23 +610,7 @@ class ChatService:
             yield cleaned
             _first_token_yielded = True
 
-        form_id = ""
-        form_title = ""
-        for idx, args_str in tool_call_args_by_index.items():
-            if tool_call_names.get(idx) == "suggest_form":
-                try:
-                    args = json.loads(args_str)
-                    f_id = args.get("form_id", "")
-                    if f_id:
-                        form_id = f_id
-                        if forms:
-                            matched = next((f for f in forms if f.get("form_id") == form_id), None)
-                            if matched:
-                                form_title = matched.get("title", "")
-                except (json.JSONDecodeError, KeyError):
-                    pass
-
-        yield {"answer": full_answer, "form_id": form_id, "form_title": form_title, "usage": usage}
+        yield {"answer": full_answer, "usage": usage}
 
     async def _load_conversation_context(self, session_id: str, tenant_id: str) -> tuple[str, list[dict]]:
         cache_key = get_redis_key(f"chat_session:{session_id}")
