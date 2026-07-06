@@ -557,11 +557,10 @@ class ChatService:
         if tools:
             system_prompt += (
                 "\n\nYou have access to a show_enquiry_form tool to capture user details. "
-                "When the user's intent matches an active form's trigger instructions, prioritize that form. "
-                "Before asking for confirmation, give a brief helpful response to the user's actual question. "
-                "For guidance, comparison, confusion, or next-step questions, provide a concise practical framework first. "
-                "Do NOT immediately call the tool. Ask a brief confirmation question in the user's language. "
-                "Only call show_enquiry_form once the user explicitly confirms."
+                "When the user expresses interest in taking an action (enroll, apply, book a demo, get a callback, etc.), "
+                "DO NOT immediately call the tool. Instead, ask the user a brief confirmation question "
+                "(e.g. 'Would you like me to show you the admission form?'). "
+                "Only call show_enquiry_form once the user explicitly confirms (says yes, haan, sure, proceed, etc.)."
             )
         api_messages = [{"role": "system", "content": system_prompt}] + messages[-MAX_HISTORY:]
         raw_llm = get_llm_raw(provider, model)
@@ -601,7 +600,7 @@ class ChatService:
                         form_id = args["form_id"]
                         break
 
-        if show_form and not answer.strip():
+        if show_form:
             answer = "Sure! Please fill in the form below and we'll get back to you."
 
         return answer, show_form, form_id, usage
@@ -611,11 +610,10 @@ class ChatService:
         if tools:
             system_prompt += (
                 "\n\nYou have access to a show_enquiry_form tool to capture user details. "
-                "When the user's intent matches an active form's trigger instructions, prioritize that form. "
-                "Before asking for confirmation, give a brief helpful response to the user's actual question. "
-                "For guidance, comparison, confusion, or next-step questions, provide a concise practical framework first. "
-                "Do NOT immediately call the tool. Ask a brief confirmation question in the user's language. "
-                "Only call show_enquiry_form once the user explicitly confirms."
+                "When the user expresses interest in taking an action (enroll, apply, book a demo, get a callback, etc.), "
+                "DO NOT immediately call the tool. Instead, ask the user a brief confirmation question "
+                "(e.g. 'Would you like me to show you the admission form?'). "
+                "Only call show_enquiry_form once the user explicitly confirms (says yes, haan, sure, proceed, etc.)."
             )
         api_messages = [{"role": "system", "content": system_prompt}] + messages[-MAX_HISTORY:]
         raw_llm = get_llm_raw(provider, model)
@@ -713,10 +711,11 @@ class ChatService:
                 except (json.JSONDecodeError, KeyError):
                     pass
 
-        if show_form and not full_answer.strip():
+        if show_form:
             fallback = "Sure! Please fill in the form below and we'll get back to you."
-            full_answer = fallback
-            yield fallback
+            if full_answer != fallback:
+                full_answer = fallback
+                yield fallback
 
         yield {"answer": full_answer, "show_form": show_form, "form_id": form_id, "usage": usage}
 
