@@ -10,7 +10,7 @@ import time
 from core.auth import db
 from core.redis import redis_client, get_redis_key
 from services.embedder import embed_text
-from services.llm.factory import get_llm, extract_usage
+from services.llm.factory import get_llm, get_llm_raw, _to_lc_messages, extract_usage
 from services.llm.pricing import calculate_cost
 from services.vector_search import search_chunks
 from repositories.knowledge_gap_repository import _vector_search_gaps
@@ -189,6 +189,7 @@ class ChatService:
                 else:
                     full_answer += item
                     await on_token(item)
+
             messages.append(self._assistant_message(full_answer, usage))
             summary, messages = await self._compact_if_needed(summary, messages, provider, model)
             await self._persist_conversation(turn, summary, messages)
@@ -201,6 +202,8 @@ class ChatService:
         summary, messages = await self._compact_if_needed(summary, messages, provider, model)
         await self._persist_conversation(turn, summary, messages)
         await self._track_visitor_message(turn.session_id, turn.visitor_id or turn.session_id, turn.tenant["tenant_id"])
+        await self._log_knowledge_gap(tenant_id, turn.query, turn.current_url, "out_of_scope", turn.message_id)
+        return ChatTurnResult(message_id=turn.message_id, answer=answer, sources=[])
         await self._log_knowledge_gap(tenant_id, turn.query, turn.current_url, "out_of_scope", turn.message_id)
         return ChatTurnResult(message_id=turn.message_id, answer=answer, sources=[])
 
@@ -517,11 +520,12 @@ class ChatService:
 
     async def _complete_answer(self, system_prompt: str, messages: list[dict], provider: str = "openai", model: str = "gpt-4o") -> tuple[str, dict[str, Any]]:
         api_messages = [{"role": "system", "content": system_prompt}] + messages[-MAX_HISTORY:]
-        llm = get_llm(provider, model)
+        raw_llm = get_llm_raw(provider, model)
+        lc_messages = _to_lc_messages(api_messages)
 
         start = time.perf_counter()
         try:
-            response = await llm.ainvoke(api_messages)
+            response = await raw_llm.ainvoke(lc_messages)
             latency_ms = (time.perf_counter() - start) * 1000
         except Exception as e:
             latency_ms = (time.perf_counter() - start) * 1000
@@ -541,7 +545,10 @@ class ChatService:
 
     async def _complete_answer_stream(self, system_prompt: str, messages: list[dict], provider: str = "openai", model: str = "gpt-4o"):
         api_messages = [{"role": "system", "content": system_prompt}] + messages[-MAX_HISTORY:]
-        llm = get_llm(provider, model)
+        raw_llm = get_llm_raw(provider, model)
+        lc_messages = _to_lc_messages(api_messages)
+
+        full_answer = ""
 
         full_answer = ""
         usage: dict[str, Any] = {
@@ -557,7 +564,7 @@ class ChatService:
 
         start = time.perf_counter()
         try:
-            async for chunk in llm.astream(api_messages):
+            async for chunk in raw_llm.astream(lc_messages):
                 if isinstance(chunk, dict) and "usage" in chunk:
                     # Final usage dict from _LLMWrapper.astream
                     stream_usage = chunk["usage"]
@@ -610,6 +617,7 @@ class ChatService:
             yield cleaned
             _first_token_yielded = True
 
+        print(f"[DEBUG] _complete_answer_stream: final full_answer len={len(full_answer)}, preview={full_answer[:100]!r}")
         yield {"answer": full_answer, "usage": usage}
 
     async def _load_conversation_context(self, session_id: str, tenant_id: str) -> tuple[str, list[dict]]:
