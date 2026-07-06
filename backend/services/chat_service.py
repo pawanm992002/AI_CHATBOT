@@ -138,6 +138,22 @@ class ChatService:
         }
 
     async def handle_message(self, turn: ChatTurnInput) -> ChatTurnResult:
+        return await self._process_turn(turn, stream=False, on_token=None)
+
+    async def handle_message_stream(self, turn: ChatTurnInput, on_token) -> ChatTurnResult:
+        """
+        Streaming version of handle_message.
+        Calls on_token(token_str) for each LLM token during answer generation.
+        Non-answer LLM calls (classify, rewrite) run normally without streaming.
+        """
+        return await self._process_turn(turn, stream=True, on_token=on_token)
+
+    async def _process_turn(
+        self,
+        turn: ChatTurnInput,
+        stream: bool,
+        on_token,
+    ) -> ChatTurnResult:
         tenant_id = turn.tenant["tenant_id"]
         business_name = turn.tenant.get("business_name") or turn.tenant["domain"]
         provider, model = self._tenant_llm_provider_model(turn.tenant)
@@ -146,120 +162,94 @@ class ChatService:
         classification = await self._classify_query(turn.query, summary, messages, provider, model)
 
         if classification == QueryClass.GREETING:
-            visitor_name = await self._get_visitor_name(turn.visitor_id or turn.session_id, tenant_id)
-            if visitor_name:
-                answer = f"Hi {visitor_name}, welcome back to {business_name}! How can I help you today?"
-            else:
-                answer = f"Hello! Welcome to {business_name}. How can I help you today?"
-            await self._track_visitor_message(turn.session_id, turn.visitor_id or turn.session_id, turn.tenant["tenant_id"])
-            return ChatTurnResult(message_id=turn.message_id, answer=answer, sources=[])
+            return await self._handle_greeting(turn, business_name, tenant_id)
 
         if classification == QueryClass.OUT_OF_SCOPE:
-            messages.append({"role": "user", "content": turn.query})
-            system_prompt = prompts.NO_MATCH_OUT_OF_SCOPE_PROMPT.format(business_name=business_name)
-            forms = await _form_config_repo.get_all_enabled_for_tenant(tenant_id)
-            tool_schema = self._build_form_tool(forms) if forms else None
-            answer, show_form, form_id, usage = await self._complete_answer(system_prompt, messages, provider, model, tools=[tool_schema] if tool_schema else None, forms=forms)
-            messages.append(self._assistant_message(answer, usage, show_form, form_id))
-            summary, messages = await self._compact_if_needed(summary, messages, provider, model)
-            await self._persist_conversation(turn, summary, messages)
-            await self._track_visitor_message(turn.session_id, turn.visitor_id or turn.session_id, turn.tenant["tenant_id"])
-            if not show_form:
-                await self._log_knowledge_gap(tenant_id, turn.query, turn.current_url, "out_of_scope", turn.message_id)
-            return ChatTurnResult(message_id=turn.message_id, answer=answer, sources=[], show_enquiry_form=show_form, enquiry_form_id=form_id)
+            return await self._handle_out_of_scope(turn, summary, messages, business_name, provider, model, tenant_id, stream, on_token)
 
-        search_query = turn.query
-        needs_search = True
+        search_query, profiles, profile_name = await self._prepare_search(turn, summary, messages, provider, model, tenant_id)
 
-        # Profile classification: fetch profiles if visitor hasn't been classified yet
-        profiles = None
-        profile_name = None
-        try:
-            visitor_doc = await db.visitors.find_one(
-                {"visitor_id": turn.visitor_id or turn.session_id, "tenant_id": tenant_id},
-                {"profile_classification_attempted": 1}
-            )
-            classification_attempted = visitor_doc.get("profile_classification_attempted") if visitor_doc else True
-            if not classification_attempted:
-                profiles = await get_enabled_profiles_for_classification(tenant_id)
-        except Exception:
-            profiles = None
-
-        # Every non-greeting, non-out-of-scope message goes through the LLM
-        # rewrite step, which resolves entities/pronouns/follow-ups from
-        # conversation history into the search query.
-        search_query, profile_name = await self._rewrite_search_query(turn.query, summary, messages, provider, model, profiles=profiles)
-
-        # If profile was identified, classify the visitor
-        if profile_name and profiles:
-            try:
-                await classify_visitor_inline(tenant_id, turn.visitor_id or turn.session_id, profile_name)
-            except Exception as e:
-                print(f"[CHAT] Profile classification failed: {e}")
-
-        print(f"[CHAT] query='{turn.query}' class={classification} search_query='{search_query}' needs_search={needs_search}")
-
-        chunks = []
-        top_score = 0.0
-        if needs_search:
-            try:
-                chunks = await search_chunks(tenant_id, search_query)
-            except Exception as e:
-                print(f"[CHAT] search_chunks failed: {e}")
-                chunks = []
-            print(f"[CHAT] search_chunks returned {len(chunks)} chunks")
-            if chunks:
-                top_score = chunks[0].get("score", 0.0)
-                print(f"[CHAT] top score: {top_score:.4f}")
+        chunks, top_score = await self._search_chunks(tenant_id, search_query)
 
         if chunks and top_score < DIRECT_ANSWER_THRESHOLD:
             print(f"[CHAT] Score {top_score:.4f} below threshold {DIRECT_ANSWER_THRESHOLD}, treating as no match")
             chunks = []
 
         if not chunks:
+            if stream:
+                return await self._handle_no_chunks_stream(turn, summary, messages, classification, on_token)
             return await self._handle_no_chunks(turn, summary, messages, classification)
 
-        return await self._handle_answer_with_chunks(turn, summary, messages, chunks, needs_search)
+        if stream:
+            return await self._handle_answer_with_chunks_stream(turn, summary, messages, chunks, True, on_token)
+        return await self._handle_answer_with_chunks(turn, summary, messages, chunks, True)
 
-    async def handle_message_stream(self, turn: ChatTurnInput, on_token):
-        """
-        Streaming version of handle_message.
-        Calls on_token(token_str) for each LLM token during answer generation.
-        Non-answer LLM calls (classify, rewrite) run normally without streaming.
-        """
-        tenant_id = turn.tenant["tenant_id"]
-        business_name = turn.tenant.get("business_name") or turn.tenant["domain"]
-        provider, model = self._tenant_llm_provider_model(turn.tenant)
+    async def _handle_greeting(self, turn: ChatTurnInput, business_name: str, tenant_id: str) -> ChatTurnResult:
+        visitor_name = await self._get_visitor_name(turn.visitor_id or turn.session_id, tenant_id)
+        if visitor_name:
+            answer = f"Hi {visitor_name}, welcome back to {business_name}! How can I help you today?"
+        else:
+            answer = f"Hello! Welcome to {business_name}. How can I help you today?"
+        await self._track_visitor_message(turn.session_id, turn.visitor_id or turn.session_id, turn.tenant["tenant_id"])
+        return ChatTurnResult(message_id=turn.message_id, answer=answer, sources=[])
 
-        summary, messages = await self._load_conversation_context(turn.session_id, tenant_id)
-        classification = await self._classify_query(turn.query, summary, messages, provider, model)
+    async def _handle_out_of_scope(
+        self,
+        turn: ChatTurnInput,
+        summary: str,
+        messages: list[dict],
+        business_name: str,
+        provider: str,
+        model: str,
+        tenant_id: str,
+        stream: bool,
+        on_token,
+    ) -> ChatTurnResult:
+        messages.append({"role": "user", "content": turn.query})
+        system_prompt = prompts.NO_MATCH_OUT_OF_SCOPE_PROMPT.format(business_name=business_name)
+        forms = await _form_config_repo.get_all_enabled_for_tenant(tenant_id)
+        tool_schema = self._build_form_tool(forms) if forms else None
 
-        if classification == QueryClass.GREETING:
-            visitor_name = await self._get_visitor_name(turn.visitor_id or turn.session_id, tenant_id)
-            if visitor_name:
-                answer = f"Hi {visitor_name}, welcome back to {business_name}! How can I help you today?"
-            else:
-                answer = f"Hello! Welcome to {business_name}. How can I help you today?"
-            await self._track_visitor_message(turn.session_id, turn.visitor_id or turn.session_id, turn.tenant["tenant_id"])
-            return ChatTurnResult(message_id=turn.message_id, answer=answer, sources=[])
-
-        if classification == QueryClass.OUT_OF_SCOPE:
-            messages.append({"role": "user", "content": turn.query})
-            system_prompt = prompts.NO_MATCH_OUT_OF_SCOPE_PROMPT.format(business_name=business_name)
-            forms = await _form_config_repo.get_all_enabled_for_tenant(tenant_id)
-            tool_schema = self._build_form_tool(forms) if forms else None
-            answer, show_form, form_id, usage = await self._complete_answer(system_prompt, messages, provider, model, tools=[tool_schema] if tool_schema else None, forms=forms)
-            messages.append(self._assistant_message(answer, usage, show_form, form_id))
+        if stream:
+            full_answer = ""
+            show_form = False
+            form_id = ""
+            usage: dict[str, Any] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "reasoning_tokens": 0, "cached_tokens": 0, "provider": provider, "model": model, "latency_ms": 0.0, "status": "success"}
+            async for item in self._complete_answer_stream(system_prompt, messages, provider, model, tools=[tool_schema] if tool_schema else None, forms=forms):
+                if isinstance(item, dict):
+                    full_answer = item["answer"]
+                    show_form = item["show_form"]
+                    form_id = item["form_id"]
+                    usage = item.get("usage", usage)
+                else:
+                    full_answer += item
+                    await on_token(item)
+            messages.append(self._assistant_message(full_answer, usage, show_form, form_id))
             summary, messages = await self._compact_if_needed(summary, messages, provider, model)
             await self._persist_conversation(turn, summary, messages)
             await self._track_visitor_message(turn.session_id, turn.visitor_id or turn.session_id, turn.tenant["tenant_id"])
             if not show_form:
                 await self._log_knowledge_gap(tenant_id, turn.query, turn.current_url, "out_of_scope", turn.message_id)
-            return ChatTurnResult(message_id=turn.message_id, answer=answer, sources=[], show_enquiry_form=show_form, enquiry_form_id=form_id)
+            return ChatTurnResult(message_id=turn.message_id, answer=full_answer, sources=[], show_enquiry_form=show_form, enquiry_form_id=form_id)
 
-        search_query = turn.query
-        needs_search = True
+        answer, show_form, form_id, usage = await self._complete_answer(system_prompt, messages, provider, model, tools=[tool_schema] if tool_schema else None, forms=forms)
+        messages.append(self._assistant_message(answer, usage, show_form, form_id))
+        summary, messages = await self._compact_if_needed(summary, messages, provider, model)
+        await self._persist_conversation(turn, summary, messages)
+        await self._track_visitor_message(turn.session_id, turn.visitor_id or turn.session_id, turn.tenant["tenant_id"])
+        if not show_form:
+            await self._log_knowledge_gap(tenant_id, turn.query, turn.current_url, "out_of_scope", turn.message_id)
+        return ChatTurnResult(message_id=turn.message_id, answer=answer, sources=[], show_enquiry_form=show_form, enquiry_form_id=form_id)
 
+    async def _prepare_search(
+        self,
+        turn: ChatTurnInput,
+        summary: str,
+        messages: list[dict],
+        provider: str,
+        model: str,
+        tenant_id: str,
+    ) -> tuple[str, list[dict] | None, str | None]:
         # Profile classification: fetch profiles if visitor hasn't been classified yet
         profiles = None
         profile_name = None
@@ -286,20 +276,22 @@ class ChatService:
             except Exception as e:
                 print(f"[CHAT] Profile classification failed: {e}")
 
+        print(f"[CHAT] query='{turn.query}' search_query='{search_query}'")
+        return search_query, profiles, profile_name
+
+    async def _search_chunks(self, tenant_id: str, search_query: str) -> tuple[list[dict], float]:
         chunks = []
         top_score = 0.0
-        if needs_search:
+        try:
             chunks = await search_chunks(tenant_id, search_query)
-            if chunks:
-                top_score = chunks[0].get("score", 0.0)
-
-        if chunks and top_score < DIRECT_ANSWER_THRESHOLD:
+        except Exception as e:
+            print(f"[CHAT] search_chunks failed: {e}")
             chunks = []
-
-        if not chunks:
-            return await self._handle_no_chunks_stream(turn, summary, messages, classification, on_token)
-
-        return await self._handle_answer_with_chunks_stream(turn, summary, messages, chunks, needs_search, on_token)
+        print(f"[CHAT] search_chunks returned {len(chunks)} chunks")
+        if chunks:
+            top_score = chunks[0].get("score", 0.0)
+            print(f"[CHAT] top score: {top_score:.4f}")
+        return chunks, top_score
 
     async def _handle_no_chunks_stream(self, turn, summary, messages, classification, on_token):
         """Streaming version of _handle_no_chunks."""
