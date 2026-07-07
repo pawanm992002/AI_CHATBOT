@@ -274,6 +274,17 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
               }).catch(() => {});
             }
             break;
+            if (data.form_id) {
+              apiClient.getLeadFormById(data.form_id).then(form => {
+                if (form) {
+                  setLeadFormConfigsById(prev => ({
+                    ...prev,
+                    [form.form_id]: form,
+                  }));
+                }
+              }).catch(() => {});
+            }
+            break;
 
           case 'done':
             messageComplete = true;
@@ -282,7 +293,13 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
               const idx = updated.length - 1;
               if (updated[idx].role === 'assistant') {
                 const cleanAnswer = data.answer || updated[idx].content;
-                updated[idx] = { ...updated[idx], content: cleanAnswer, messageId: data.message_id, isStreaming: false };
+                const msg = updated[idx];
+                let content = cleanAnswer;
+                if (msg.suggestedFormId && msg.suggestedFormTitle) {
+                  const suffix = `\n\nInterested? Fill out the **${msg.suggestedFormTitle}** form below.`;
+                  if (!content.endsWith(suffix)) content += suffix;
+                }
+                updated[idx] = { ...msg, content, messageId: data.message_id, isStreaming: false };
               }
               return updated;
             });
