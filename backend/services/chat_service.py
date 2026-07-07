@@ -30,7 +30,7 @@ from services.visitor_profile_service import (
 
 MAX_HISTORY = 50
 MAX_REWRITE_HISTORY = 12
-DIRECT_ANSWER_THRESHOLD = 0.2
+DIRECT_ANSWER_THRESHOLD = 0.0
 
 _form_config_repo = LeadFormConfigRepository()
 
