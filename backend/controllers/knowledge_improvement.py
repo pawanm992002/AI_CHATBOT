@@ -13,6 +13,8 @@ from pydantic import BaseModel
 router = APIRouter(prefix="/dashboard/knowledge", tags=["knowledge-improvement"])
 gap_repo = KnowledgeGapRepository()
 
+KNOWLEDGE_GAP_TYPES = ["no_context", "knowledge_gap"]
+
 
 class GapResponse(BaseModel):
     gap_id: str
@@ -48,7 +50,9 @@ async def list_knowledge_gaps(
     query_filter = {"tenant_id": tenant_id}
     if status != "all":
         query_filter["status"] = status
-    if gap_type:
+    if gap_type == "knowledge_gap":
+        query_filter["gap_type"] = {"$in": KNOWLEDGE_GAP_TYPES}
+    elif gap_type:
         query_filter["gap_type"] = gap_type
 
     total = await db.knowledge_gaps.count_documents(query_filter)
@@ -158,7 +162,11 @@ async def get_gap_stats(current_tenant: dict = Depends(get_current_tenant)):
     resolved = await gap_repo.count_by_tenant(tenant_id, status="resolved")
     dismissed = await gap_repo.count_by_tenant(tenant_id, status="dismissed")
 
-    no_context_open = await db.knowledge_gaps.count_documents({"tenant_id": tenant_id, "status": "open", "gap_type": "no_context"})
+    no_context_open = await db.knowledge_gaps.count_documents({
+        "tenant_id": tenant_id,
+        "status": "open",
+        "gap_type": {"$in": KNOWLEDGE_GAP_TYPES},
+    })
     out_of_scope_open = await db.knowledge_gaps.count_documents({"tenant_id": tenant_id, "status": "open", "gap_type": "out_of_scope"})
 
     top_gaps = await db.knowledge_gaps.find(

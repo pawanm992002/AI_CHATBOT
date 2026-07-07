@@ -1,4 +1,4 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Message } from '@chatbot/shared';
 import { Palette } from '../utils/theme';
@@ -35,6 +35,7 @@ export function MessageList({
   leadFormConfigsById,
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [expandedFormIndex, setExpandedFormIndex] = useState<number | null>(null);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -275,13 +276,34 @@ export function MessageList({
             </div>
           )}
 
-          {/* Enquiry form */}
-          {m.showEnquiryForm && !m.enquirySubmitted && (() => {
-            const formConfig = m.enquiryFormId
-              ? leadFormConfigsById[m.enquiryFormId]
+          {/* Form suggestion button */}
+          {m.role === 'assistant' && m.suggestedFormId && expandedFormIndex !== i && (
+            <button
+              onClick={() => setExpandedFormIndex(i)}
+              className="mt-2 px-4 py-2 rounded-xl text-[13px] font-semibold cursor-pointer border transition-all duration-150"
+              style={{
+                borderColor: accent,
+                color: accent,
+                backgroundColor: `${accent}10`,
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.backgroundColor = `${accent}20`;
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.backgroundColor = `${accent}10`;
+              }}
+            >
+              {m.suggestedFormTitle || 'Fill Enquiry Form'}
+            </button>
+          )}
+
+          {/* Enquiry form (expanded on button click) */}
+          {m.role === 'assistant' && m.suggestedFormId && expandedFormIndex === i && (() => {
+            const formConfig = m.suggestedFormId
+              ? leadFormConfigsById[m.suggestedFormId]
               : leadFormConfig;
 
-            if (m.enquiryFormId && !formConfig) {
+            if (m.suggestedFormId && !formConfig) {
               return (
                 <div
                   className="mt-2.5 pt-2.5 text-[12px]"
@@ -298,21 +320,14 @@ export function MessageList({
                   accent={accent}
                   palette={palette}
                   formConfig={formConfig}
-                  onSubmit={(formData) => onEnquirySubmit(i, formData)}
+                  onSubmit={(formData) => {
+                    onEnquirySubmit(i, formData);
+                    setExpandedFormIndex(null);
+                  }}
                 />
               </ErrorBoundary>
             );
           })()}
-
-          {/* Enquiry submitted confirmation */}
-          {m.showEnquiryForm && m.enquirySubmitted && (
-            <div className="mt-2 text-[13px] text-green-500 font-semibold flex items-center gap-1.5">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-              Thanks! We'll get back to you soon.
-            </div>
-          )}
         </div>
       ))}
     </div>

@@ -84,8 +84,7 @@ export interface Message {
   isStreaming?: boolean;
   messageId?: string;
   sources?: ChatSource[];
-  showEnquiryForm?: boolean;
-  enquiryFormId?: string;
-  enquirySubmitted?: boolean;
+  suggestedFormId?: string;
+  suggestedFormTitle?: string;
   feedback?: 'like' | 'dislike' | null;
 }
