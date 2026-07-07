@@ -789,7 +789,7 @@ class ChatService:
 
     def _build_sources(self, chunks: list[dict]) -> list[ChatSource]:
         sources = []
-        seen_urls: set[str] = set()
+        seen_urls: set[tuple[str, str]] = set()
         seen_labels: set[str] = set()
         for c in chunks:
             url = c.get("url", "")

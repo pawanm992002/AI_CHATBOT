@@ -312,9 +312,9 @@ async def _upsert_visitor(
     client_ip: str,
     visitor_id: str = "",
 ) -> None:
+    now = datetime.now(timezone.utc)
+    key = visitor_id or session_id
     try:
-        now = datetime.now(timezone.utc)
-        key = visitor_id or session_id
         visitor = await db.visitors.find_one(
             {"visitor_id": key, "tenant_id": tenant_id},
             {"ip_history": {"$slice": -1}, "page_views": {"$slice": -1}},
