@@ -296,7 +296,7 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
                 const msg = updated[idx];
                 let content = cleanAnswer;
                 if (msg.suggestedFormId && msg.suggestedFormTitle) {
-                  const suffix = `\n\nInterested? Fill out the **${msg.suggestedFormTitle}** form below.`;
+                  const suffix = `\n\nFill out the **${msg.suggestedFormTitle}** form below.`;
                   if (!content.endsWith(suffix)) content += suffix;
                 }
                 updated[idx] = { ...msg, content, messageId: data.message_id, isStreaming: false };
