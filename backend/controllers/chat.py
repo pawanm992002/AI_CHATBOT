@@ -10,6 +10,7 @@ from models.requests import ChatRequest, FeedbackRequest
 from services.chat_service import ChatService, ChatTurnInput
 from views.responses import ChatResponse, ChatSource, WidgetConfigResponse
 from repositories.lead_repository import LeadFormConfigRepository
+from services.archival_service import archival_service
 
 
 router = APIRouter(tags=["chat"])
@@ -151,6 +152,74 @@ async def chat(
         suggested_form_id=result.suggested_form_id,
         suggested_form_title=result.suggested_form_title,
     )
+
+
+@router.get("/widget/conversations")
+async def get_widget_conversations(
+    visitor_id: str = Query(...),
+    current_tenant: dict = Depends(verify_api_key),
+):
+    tenant_id = current_tenant["tenant_id"]
+    visitor = await db.visitors.find_one(
+        {"visitor_id": visitor_id, "tenant_id": tenant_id},
+        {"conversation_ids": 1}
+    )
+    if not visitor:
+        return []
+
+    conversation_ids = visitor.get("conversation_ids", [])
+    if not conversation_ids:
+        return []
+
+    cursor = db.conversations.find(
+        {"session_id": {"$in": conversation_ids}, "tenant_id": tenant_id},
+        {"_id": 0, "session_id": 1, "summary": 1, "created_at": 1, "updated_at": 1, "messages": 1, "archived_turn_count": 1},
+    ).sort("updated_at", -1)
+
+    conversations = await cursor.to_list(length=100)
+
+    result = []
+    for conv in conversations:
+        messages = conv.get("messages", [])
+        archived_count = conv.get("archived_turn_count", 0)
+        total_count = archived_count + len(messages)
+
+        preview = ""
+        for msg in messages:
+            if msg.get("role") == "user" and msg.get("content"):
+                preview = msg["content"][:120]
+                break
+        if not preview:
+            preview = conv.get("summary", "")[:120]
+
+        result.append({
+            "session_id": conv["session_id"],
+            "preview": preview,
+            "message_count": total_count,
+            "created_at": conv.get("created_at"),
+            "updated_at": conv.get("updated_at"),
+        })
+
+    return result
+
+
+@router.get("/widget/conversations/{session_id}")
+async def get_widget_conversation(
+    session_id: str,
+    current_tenant: dict = Depends(verify_api_key),
+):
+    tenant_id = current_tenant["tenant_id"]
+    result = await archival_service.get_full_conversation(session_id, tenant_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    messages = result.get("full_messages", result.get("messages", []))
+
+    return {
+        "session_id": session_id,
+        "messages": messages,
+        "summary": result.get("summary", ""),
+    }
 
 
 @router.post("/feedback")
@@ -297,7 +366,6 @@ async def websocket_chat(websocket: WebSocket, key_hash: str = Query(...)):
 
 async def _archive_old_sessions_bg(old_session_ids: list[str], tenant_id: str) -> None:
     try:
-        from services.archival_service import archival_service
         for s_id in old_session_ids:
             await archival_service.archive_entire_session(s_id, tenant_id)
     except Exception as e:
@@ -312,9 +380,9 @@ async def _upsert_visitor(
     client_ip: str,
     visitor_id: str = "",
 ) -> None:
+    now = datetime.now(timezone.utc)
+    key = visitor_id or session_id
     try:
-        now = datetime.now(timezone.utc)
-        key = visitor_id or session_id
         visitor = await db.visitors.find_one(
             {"visitor_id": key, "tenant_id": tenant_id},
             {"ip_history": {"$slice": -1}, "page_views": {"$slice": -1}},

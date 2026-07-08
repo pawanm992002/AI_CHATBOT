@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo, CSSProperties } from 'react';
-import { submitEnquiry, getWidgetConfig, submitFeedback, getVisitorProfile, apiClient, LeadFormConfig } from './api';
+import { submitEnquiry, getWidgetConfig, submitFeedback, getVisitorProfile, getConversations, getConversationMessages, apiClient, LeadFormConfig, ConversationSummary } from './api';
 import { WidgetProps, Message, useIsMobile, useStyleInjection } from '@chatbot/shared';
 import { getPalette } from './utils/theme';
 import { useHostTheme } from './hooks/useHostTheme';
@@ -8,9 +8,11 @@ import { Header } from './components/Header';
 import { FloatingButton } from './components/FloatingButton';
 import { MessageList } from './components/MessageList';
 import { InputArea } from './components/InputArea';
+import { SessionHistory } from './components/SessionHistory';
 import {
   SESSION_EXPIRY_MS,
   HISTORY_STORAGE_KEY_PREFIX,
+  SESSION_STORAGE_KEY,
   WIDGET_WIDTH,
   WIDGET_HEIGHT,
   MOBILE_WIDGET_HEIGHT,
@@ -49,6 +51,9 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
   const [leadFormConfigsById, setLeadFormConfigsById] = useState<Record<string, LeadFormConfig>>({});
   const [isDisabled, setIsDisabled] = useState(false);
   const [profileColor, setProfileColor] = useState<string | null>(null);
+  const [view, setView] = useState<'chat' | 'history'>('chat');
+  const [sessions, setSessions] = useState<ConversationSummary[]>([]);
+  const [loadingSessions, setLoadingSessions] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -153,7 +158,40 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
   const handleNewSession = useCallback(() => {
     resetSessionId();
     setMessages([]);
+    setView('chat');
     sessionStorage.removeItem(`${HISTORY_STORAGE_KEY_PREFIX}${apiKey}`);
+  }, [apiKey]);
+
+  const handleOpenHistory = useCallback(async () => {
+    setView('history');
+    if (sessions.length > 0) return;
+    setLoadingSessions(true);
+    try {
+      const visitorId = getVisitorId();
+      const data = await getConversations(visitorId);
+      setSessions(data);
+    } catch (err) {
+      console.error("Failed to load sessions", err);
+    } finally {
+      setLoadingSessions(false);
+    }
+  }, [sessions.length]);
+
+  const handleSelectSession = useCallback(async (sessionId: string) => {
+    try {
+      const data = await getConversationMessages(sessionId);
+      sessionStorage.setItem(SESSION_STORAGE_KEY, sessionId);
+      sessionStorage.removeItem(`${HISTORY_STORAGE_KEY_PREFIX}${apiKey}`);
+      const mappedMessages: Message[] = (data.messages || []).map((m: any) => ({
+        role: m.role,
+        content: m.content,
+        messageId: m.messageId || undefined,
+      }));
+      setMessages(mappedMessages);
+      setView('chat');
+    } catch (err) {
+      console.error("Failed to load conversation", err);
+    }
   }, [apiKey]);
 
   const getWs = useCallback(async (): Promise<WebSocket> => {
@@ -479,7 +517,7 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
             )}
 
             {/* Header */}
-            <Header palette={palette} onClose={() => setIsOpen(false)} onNewSession={handleNewSession} profileColor={profileColor} />
+            <Header palette={palette} onClose={() => setIsOpen(false)} onNewSession={handleNewSession} onHistory={handleOpenHistory} profileColor={profileColor} />
 
             {/* Messages area */}
             {isDisabled ? (
@@ -501,6 +539,17 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
                   Tenant is disabled. Please contact the administrator.
                 </p>
               </div>
+            ) : view === 'history' ? (
+              <SessionHistory
+                palette={palette}
+                sessions={sessions}
+                accent={accent}
+                isDark={isDark}
+                loading={loadingSessions}
+                onSelectSession={handleSelectSession}
+                onNewChat={handleNewSession}
+                onBack={() => setView('chat')}
+              />
             ) : (
               <>
                 <div className="flex-1 flex flex-col overflow-hidden relative">
