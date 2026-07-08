@@ -1,3 +1,5 @@
+import type { Message } from '@chatbot/shared';
+
 const DEFAULT_API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8000").replace(/\/$/, "");
 
 export interface LeadFormFieldConfig {
@@ -213,6 +215,18 @@ class ApiClient {
       method: "GET",
     });
   }
+
+  public getConversations(visitorId: string): Promise<ConversationSummary[]> {
+    return this.request<ConversationSummary[]>(`/widget/conversations?visitor_id=${encodeURIComponent(visitorId)}`, {
+      method: "GET",
+    });
+  }
+
+  public getConversationMessages(sessionId: string): Promise<ConversationDetail> {
+    return this.request<ConversationDetail>(`/widget/conversations/${encodeURIComponent(sessionId)}`, {
+      method: "GET",
+    });
+  }
 }
 
 export const apiClient = new ApiClient();
@@ -229,5 +243,25 @@ export const getLeadFormById = (formId: string) =>
 export const submitFeedback = (messageId: string, sessionId: string, rating: 'like' | 'dislike', visitorId?: string) =>
   apiClient.submitFeedback(messageId, sessionId, rating, visitorId);
 
+export interface ConversationSummary {
+  session_id: string;
+  preview: string;
+  message_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConversationDetail {
+  session_id: string;
+  messages: Message[];
+  summary: string;
+}
+
 export const getVisitorProfile = (visitorId: string) =>
   apiClient.getVisitorProfile(visitorId);
+
+export const getConversations = (visitorId: string) =>
+  apiClient.getConversations(visitorId);
+
+export const getConversationMessages = (sessionId: string) =>
+  apiClient.getConversationMessages(sessionId);

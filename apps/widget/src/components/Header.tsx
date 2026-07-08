@@ -4,10 +4,11 @@ interface HeaderProps {
   palette: Palette;
   onClose: () => void;
   onNewSession: () => void;
+  onHistory: () => void;
   profileColor?: string | null;
 }
 
-export function Header({ palette, onClose, onNewSession, profileColor }: HeaderProps) {
+export function Header({ palette, onClose, onNewSession, onHistory, profileColor }: HeaderProps) {
   return (
     <div 
       className="px-5 py-4 flex justify-between items-center shrink-0"
@@ -36,6 +37,18 @@ export function Header({ palette, onClose, onNewSession, profileColor }: HeaderP
             title="Visitor profile recognized"
           />
         )}
+        <button
+          onClick={onHistory}
+          aria-label="Chat History"
+          className="w-8 h-8 rounded-lg bg-white/15 border-none cursor-pointer flex items-center justify-center transition-colors duration-150 hover:bg-white/25"
+          style={{ color: palette.headerText }}
+          title="Chat History"
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <polyline points="12 6 12 12 16 14" />
+          </svg>
+        </button>
         <button
           onClick={onNewSession}
           aria-label="New Chat"

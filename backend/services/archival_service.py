@@ -9,6 +9,7 @@ from core.auth import db
 from core.config import settings
 
 MAX_TURNS = 30
+ARCHIVE_PART_SIZE_BYTES = 512_000
 
 
 _pending: set[str] = set()
@@ -32,18 +33,108 @@ class ArchivalService:
     """
     Hot/Cold conversation storage.
 
-    Design tradeoff:
-    - DO Spaces does NOT support true append (no append_object API).
-    - Two strategies considered:
-      1) Read-modify-write: download the full archive, append new line(s), re-upload.
-         Simple but wasteful for large archives (upload cost grows with archive size).
-      2) Rolling numbered parts: once a part exceeds ARCHIVE_PART_SIZE bytes,
-         start a new part. Each part is immutable once sealed.
-         Writes stay small and cheap regardless of total history size.
-    - We choose strategy 2 (rolling parts) to keep write costs low and bounded.
-      The `archive_part` counter is derived from `archived_turn_count // (MAX_TURNS * 2)`
-      where archived_turn_count stores individual message count.
+    Strategy: read-merge-write with true size-bounded parts.
+    - DO Spaces does NOT support atomic append (no append_object API).
+    - Before each write, we read any existing content at the target part key,
+      append the new JSONL lines, and re-upload the combined body.  This
+      read-merge-write approach ensures previously archived turns are never
+      silently overwritten.
+    - If the merged body exceeds ARCHIVE_PART_SIZE_BYTES (512KB), we roll to
+      the next sequential part number instead of overwriting. This bounds
+      per-request upload size while preventing silent data loss.
+    - The same size check applies even to a fresh (empty) part: if the inbound
+      batch is itself larger than 512KB, it is chunked across multiple parts.
+    - The current part number is tracked in ``archive_current_part`` (default 1)
+      in the conversation document, not derived from message counts.  This
+      eliminates the decoupled-count problem where the count-based hint skips
+      ahead of the physically written part number, creating unreachable gaps.
+    - ``get_full_conversation()`` uses ``list_objects_v2`` with prefix matching
+      to enumerate all existing parts, making it resilient to gaps regardless
+      of cause.
     """
+
+    async def _append_to_archive_part(
+        self, tenant_id: str, conversation_id: str, start_part: int, new_lines: list[str]
+    ) -> int:
+        """
+        Write new JSONL lines to an archive part, merging with existing content.
+
+        Reads any existing content at the target part key, appends new lines,
+        and re-uploads the combined body.  If the merged content exceeds
+        ARCHIVE_PART_SIZE_BYTES, increments the part number until a suitable
+        part is found (either empty or with room to append).
+
+        The size check applies unconditionally — even to a fresh (empty) part.
+        If the inbound batch alone exceeds the threshold, it is split across
+        sequential parts.
+
+        Returns the final part number written to (may differ from start_part
+        due to size rollover or chunking).  Callers must persist this value
+        in MongoDB as ``archive_current_part``.
+        """
+        client = _get_client()
+        part = start_part
+
+        line_idx = 0
+        while line_idx < len(new_lines):
+            key = _archive_key(tenant_id, conversation_id, part)
+            existing = b""
+            try:
+                resp = client.get_object(
+                    Bucket=settings.DO_SPACES_BUCKET,
+                    Key=key,
+                )
+                existing = resp["Body"].read()
+            except client.exceptions.NoSuchKey:
+                pass
+
+            # Collect as many lines as fit under the threshold when combined
+            # with existing content.
+            batch = []
+            batch_size = len(existing)
+            while line_idx < len(new_lines):
+                line_bytes = (new_lines[line_idx] + "\n").encode("utf-8")
+                if batch_size + len(line_bytes) > ARCHIVE_PART_SIZE_BYTES:
+                    break
+                batch.append(new_lines[line_idx])
+                batch_size += len(line_bytes)
+                line_idx += 1
+
+            if not batch:
+                if existing:
+                    # Existing part is already at/near capacity — roll to the
+                    # next part without consuming any lines.
+                    part += 1
+                    continue
+                # Fresh (empty) part but the current line alone exceeds the
+                # threshold.  Write it anyway to guarantee line_idx always
+                # advances — otherwise the outer loop retries the same line
+                # on every subsequent part forever, a hard hang.
+                body_bytes = (new_lines[line_idx] + "\n").encode("utf-8")
+                client.put_object(
+                    Bucket=settings.DO_SPACES_BUCKET,
+                    Key=key,
+                    Body=body_bytes,
+                    ContentType="application/jsonl",
+                )
+                line_idx += 1
+                part += 1
+                continue
+
+            body_bytes = ("\n".join(batch) + "\n").encode("utf-8")
+            body = existing + body_bytes if existing else body_bytes
+
+            client.put_object(
+                Bucket=settings.DO_SPACES_BUCKET,
+                Key=key,
+                Body=body,
+                ContentType="application/jsonl",
+            )
+
+            if line_idx < len(new_lines):
+                part += 1
+
+        return part
 
     async def archive_overflow_turns(
         self, conversation_id: str, tenant_id: str
@@ -86,8 +177,6 @@ class ArchivalService:
         turns_to_keep = messages[-(MAX_TURNS * 2):]
         turns_to_move = messages[:turns_to_archive]
 
-        archive_part = conv.get("archived_turn_count", 0) // (MAX_TURNS * 2) + 1
-
         lines = []
         for i in range(0, len(turns_to_move), 2):
             if i + 1 < len(turns_to_move):
@@ -101,34 +190,27 @@ class ArchivalService:
         if not lines:
             return
 
-        key = _archive_key(tenant_id, conversation_id, archive_part)
-        client = _get_client()
-        body = "\n".join(lines) + "\n"
-
-        client.put_object(
-            Bucket=settings.DO_SPACES_BUCKET,
-            Key=key,
-            Body=body.encode("utf-8"),
-            ContentType="application/jsonl",
-        )
+        archive_part = conv.get("archive_current_part", 1)
+        final_part = await self._append_to_archive_part(tenant_id, conversation_id, archive_part, lines)
 
         archived_previously = conv.get("archived_turn_count", 0)
         new_archived_count = archived_previously + len(turns_to_move)
 
+        set_fields = {
+            "messages": turns_to_keep,
+            "archived": True,
+            "archived_turn_count": new_archived_count,
+            "archive_current_part": final_part,
+            "updated_at": datetime.now(timezone.utc),
+        }
+
         await db.conversations.update_one(
             {"session_id": conversation_id, "tenant_id": tenant_id},
-            {
-                "$set": {
-                    "messages": turns_to_keep,
-                    "archived": True,
-                    "archived_turn_count": new_archived_count,
-                    "updated_at": datetime.now(timezone.utc),
-                }
-            },
+            {"$set": set_fields},
         )
         print(
             f"[ARCHIVAL] Archived {len(turns_to_move)} turns for {conversation_id} "
-            f"to {key}. Total archived: {new_archived_count}"
+            f"(part starting at {archive_part}). Total archived: {new_archived_count}"
         )
 
     async def archive_entire_session(self, conversation_id: str, tenant_id: str) -> None:
@@ -150,9 +232,6 @@ class ArchivalService:
             if not messages:
                 return
 
-            archived_previously = conv.get("archived_turn_count", 0)
-            archive_part = archived_previously // (MAX_TURNS * 2) + 1
-
             lines = []
             for i in range(0, len(messages), 2):
                 if i + 1 < len(messages):
@@ -173,29 +252,23 @@ class ArchivalService:
             if not lines:
                 return
 
-            key_path = _archive_key(tenant_id, conversation_id, archive_part)
-            client = _get_client()
-            body = "\n".join(lines) + "\n"
+            archive_part = conv.get("archive_current_part", 1)
+            final_part = await self._append_to_archive_part(tenant_id, conversation_id, archive_part, lines)
 
-            client.put_object(
-                Bucket=settings.DO_SPACES_BUCKET,
-                Key=key_path,
-                Body=body.encode("utf-8"),
-                ContentType="application/jsonl",
-            )
-
+            archived_previously = conv.get("archived_turn_count", 0)
             new_archived_count = archived_previously + len(messages)
+
+            set_fields = {
+                "messages": [],
+                "archived": True,
+                "archived_turn_count": new_archived_count,
+                "archive_current_part": final_part,
+                "updated_at": datetime.now(timezone.utc),
+            }
 
             await db.conversations.update_one(
                 {"session_id": conversation_id, "tenant_id": tenant_id},
-                {
-                    "$set": {
-                        "messages": [],
-                        "archived": True,
-                        "archived_turn_count": new_archived_count,
-                        "updated_at": datetime.now(timezone.utc),
-                    }
-                },
+                {"$set": set_fields},
             )
             print(f"[ARCHIVAL] Entire session {conversation_id} archived. Total turns: {new_archived_count}")
         except Exception as e:
@@ -218,9 +291,31 @@ class ArchivalService:
 
         archived_turns = []
         client = _get_client()
-        part = 1
-        while True:
-            key = _archive_key(tenant_id, conversation_id, part)
+
+        # Enumerate all existing archive parts via list_objects_v2 so we are
+        # resilient to gaps in part numbering (e.g. if a part was deleted or
+        # the old count-derived hint skipped ahead).  Sorting by key is safe
+        # because zero-padded part numbers sort lexicographically.
+        prefix = f"conversations/{tenant_id}/{conversation_id}/archive_"
+        try:
+            paginator = client.get_paginator("list_objects_v2")
+            page_iter = paginator.paginate(
+                Bucket=settings.DO_SPACES_BUCKET,
+                Prefix=prefix,
+            )
+            keys: list[str] = []
+            for page in page_iter:
+                contents = page.get("Contents", [])
+                for obj in contents:
+                    key = obj["Key"]
+                    if key.endswith(".jsonl"):
+                        keys.append(key)
+            keys.sort()
+        except Exception as e:
+            print(f"[ARCHIVAL] Error listing archive parts for {conversation_id}: {e}")
+            keys = []
+
+        for key in keys:
             try:
                 resp = client.get_object(
                     Bucket=settings.DO_SPACES_BUCKET,
@@ -238,12 +333,8 @@ class ArchivalService:
                             "role": "assistant",
                             "content": turn["assistant"],
                         })
-                part += 1
-            except client.exceptions.NoSuchKey:
-                break
             except Exception as e:
                 print(f"[ARCHIVAL] Error reading archive part {key}: {e}")
-                break
 
         conv["full_messages"] = archived_turns + conv.get("messages", [])
         return conv

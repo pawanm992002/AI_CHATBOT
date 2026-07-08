@@ -30,6 +30,7 @@ from services.visitor_profile_service import (
 
 MAX_HISTORY = 50
 MAX_REWRITE_HISTORY = 12
+MAX_DEARCHIVE_MESSAGES = 120
 DIRECT_ANSWER_THRESHOLD = 0.0
 
 _form_config_repo = LeadFormConfigRepository()
@@ -633,6 +634,49 @@ class ChatService:
         session = await db.conversations.find_one({"session_id": session_id, "tenant_id": tenant_id})
         if not session:
             return "", []
+
+        # De-archive on first resume: if the session was archived to DO Spaces,
+        # pull the full history back into MongoDB so subsequent turns don't
+        # re-read DO Spaces. This is a one-time cost per resumed session.
+        if session.get("archived"):
+            try:
+                full = await archival_service.get_full_conversation(session_id, tenant_id)
+                if full and full.get("full_messages"):
+                    full_messages = full["full_messages"]
+
+                    # Cap before the MongoDB write: BSON 16MB limit applies here.
+                    # Compaction (_compact_if_needed) runs later in _process_turn
+                    # and cannot rescue a write that already failed this line.
+                    if len(full_messages) > MAX_DEARCHIVE_MESSAGES:
+                        full_messages = full_messages[-MAX_DEARCHIVE_MESSAGES:]
+
+                    now = datetime.now(timezone.utc)
+                    result = await db.conversations.find_one_and_update(
+                        {"session_id": session_id, "tenant_id": tenant_id, "archived": True},
+                        {"$set": {
+                            "messages": full_messages,
+                            "archived": False,
+                            "archive_key": None,
+                            "updated_at": now,
+                        }},
+                    )
+                    if result is None:
+                        # Another concurrent request already de-archived this session.
+                        refreshed = await db.conversations.find_one(
+                            {"session_id": session_id, "tenant_id": tenant_id},
+                            {"messages": 1, "summary": 1},
+                        )
+                        if refreshed:
+                            session["messages"] = refreshed.get("messages", [])
+                            session["summary"] = refreshed.get("summary", session.get("summary", ""))
+                            session["archived"] = False
+                    else:
+                        session["messages"] = full_messages
+                        session["archived"] = False
+
+                    print(f"[CHAT] De-archived session {session_id} ({len(session.get('messages', []))} messages restored)")
+            except Exception as e:
+                print(f"[CHAT] Failed to de-archive session {session_id}: {e}")
 
         summary = session.get("summary", "")
         messages = session.get("messages", [])
