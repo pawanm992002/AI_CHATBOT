@@ -70,14 +70,26 @@ async def list_sources(current_tenant: dict = Depends(get_current_tenant)):
         {"_id": 0}
     ).sort("started_at", -1).to_list(length=100)
 
+    if crawl_jobs:
+        crawl_ids = [j["job_id"] for j in crawl_jobs if j.get("job_id")]
+        pipeline = [
+            {"$match": {"tenant_id": tenant_id, "crawl_id": {"$in": crawl_ids}}},
+            {"$group": {"_id": "$crawl_id", "count": {"$sum": 1}}}
+        ]
+        chunk_counts_cursor = db.chunks.aggregate(pipeline)
+        chunk_counts = {c["_id"]: c["count"] async for c in chunk_counts_cursor}
+    else:
+        chunk_counts = {}
+
     for job in crawl_jobs:
+        job_id = job.get("job_id", "")
         sources.append({
             "tenant_id": tenant_id,
-            "source_id": f"crawl_{job.get('job_id', '')}",
+            "source_id": f"crawl_{job_id}",
             "source_type": "website",
             "name": job.get("seed_url", "Website"),
             "status": "ready",
-            "chunk_count": job.get("chunks_created", 0),
+            "chunk_count": chunk_counts.get(job_id, 0),
             "config": {
                 "seed_url": job.get("seed_url"),
                 "pages_found": job.get("pages_found", 0),
