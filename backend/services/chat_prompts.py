@@ -85,6 +85,15 @@ NO_MATCH_EVALUATOR_PROMPT = (
     "Respond with ONLY: OUT_OF_SCOPE or KNOWLEDGE_GAP"
 )
 
+NO_MATCH_EVALUATOR_WITH_ANSWER_PROMPT = (
+    "The user asked a question to a business website chatbot and an answer was generated.{business_context}\n\n"
+    "Evaluate if the generated answer is SUFFICIENT for the user's query:\n"
+    "- SUFFICIENT - The answer adequately addresses the query\n"
+    "- OUT_OF_SCOPE - The query is completely unrelated to the business\n"
+    "- NO_CONTEXT - The answer indicates no relevant information was found\n\n"
+    "Respond with ONLY: SUFFICIENT, OUT_OF_SCOPE, or NO_CONTEXT"
+)
+
 SCHOOL_MODE_ACTIVATED_PROMPT = (
     "You are now in School Data mode. You have access to the school's ERP data including students, "
     "classes, sections, fees, payments, transport, and hostel records.\n\n"
