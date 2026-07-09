@@ -1,0 +1,19 @@
+FIX: Missing knowledge-gap logging for irrelevant chunks
+
+PROBLEM:
+When the bot retrieved low-relevance chunks and responded "I don't have enough
+information", no gap was recorded in the dashboard. The _handle_answer_with_chunks
+paths never called _log_knowledge_gap.
+
+FIX (3 files changed):
+- Added a new prompt and method (_evaluate_answer_sufficiency) that checks if the
+  bot's answer actually addressed the query, returning sufficient/out_of_scope/
+  no_context.
+- Non-streaming handler: fire-and-forget via asyncio.ensure_future() (response not
+  yet sent, can't add latency).
+- Streaming handler: plain await (stream already complete, zero user impact).
+- Both guarded by existing if not form_id: pattern.
+- On LLM error → defaults to "sufficient" (fail-safe, no false gaps).
+
+TESTS:
+14 tests added (unittest), all passing.

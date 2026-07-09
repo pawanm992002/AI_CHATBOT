@@ -49,11 +49,11 @@ async def _bm25_search(tenant_id: str, query: str, top_k: int) -> list[dict]:
         return []
 
 
-async def search_chunks(tenant_id: str, query: str, top_k: int = 5):
+async def search_chunks(tenant_id: str, query: str, top_k: int = 12):
     query_vector = await embed_text(query)
-    vector_slots = max(top_k - 2, 1)   # 3 slots from vector
-    bm25_slots = top_k - vector_slots  # 2 slots from BM25
-    child_limit = vector_slots * 3     # 9 candidates needed to find 3 unique parents
+    vector_slots = max(int(top_k * 0.6), 1)   # 60% vector
+    bm25_slots = top_k - vector_slots          # 40% BM25
+    child_limit = vector_slots * 4             # more candidates for diversity
 
     # Run vector search and BM25 search in parallel
     vector_task = _vector_search(tenant_id, query_vector, child_limit)
