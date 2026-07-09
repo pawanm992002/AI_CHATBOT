@@ -11,6 +11,7 @@ import json
 import re
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 
 from core.auth import db
@@ -19,16 +20,27 @@ from services.llm.factory import get_llm
 from services.school_data_filter import build_safe_filter
 
 COLLECTION_DESCRIPTIONS = {
-    "schools": "School information (name, id)",
-    "school_classes": "Classes/standards offered (e.g. Nursery, 1, 2, ... 8)",
-    "school_sections": "Sections within each class (A, B, C)",
-    "school_students": "Student records (name, admission_no, class, section, parents, gender, blood_group, category, address)",
-    "school_routes": "Transport routes",
-    "school_stops": "Bus stops on each route",
-    "school_transport_assign": "Which students are assigned to which transport routes",
-    "school_hostel_assign": "Hostel assignments for students",
-    "school_applied_fees": "Fee structure applied to each student (fee_head, amount, concession, status)",
-    "school_payments": "Payment records against applied fees",
+    "schools": "School information (name, id). One record per school.",
+    "school_classes": "Classes/standards offered. class_name values: Nursery, LKG, UKG, 1, 2, 3, 4, 5, 6, 7, 8",
+    "school_sections": "Sections within each class. section_name values: A, B, C",
+    "school_students": "Student records. Fields: student_id, admission_no (e.g. ADM001), student_name, father_name, "
+                       "mother_name, gender (Male/Female), blood_group (A+, A-, AB+, B+, B-, O+, O-), "
+                       "category (General, OBC, SC, ST, EWS), address, class_id, section_id. "
+                       "To find fees/transport/hostel for a student, search by student first, related records are fetched automatically.",
+    "school_routes": "Transport routes. route_name values: Vaishali Nagar, Mansarovar, Vidyadhar Nagar, Jhotwara",
+    "school_stops": "Bus stops on each route. stop_name values include Gandhi Path, Amrapali Circle, etc.",
+    "school_transport_assign": "Transport assignments for students. Fields: student_id, route_id, stop_id, vehicle_no, "
+                               "transport_status (Active/Inactive)",
+    "school_hostel_assign": "Hostel assignments for students. Fields: student_id, hostel_name, room_no, bed_no, "
+                            "hostel_status (Active/Vacated)",
+    "school_applied_fees": "Fee structure applied to each student. "
+                           "fee_head values: Tuition Fee, Transport Fee, Exam Fee, Hostel Fee. "
+                           "status values: Paid, Pending, Partial. "
+                           "Use status='Pending' or status='Partial' when looking for due/unpaid fees. "
+                           "Do NOT use 'due' as a status value.",
+    "school_payments": "Payment records against applied fees. "
+                       "payment_mode values: Cash, Net Banking, UPI, Card. "
+                       "receipt_no format: REC0001, REC0002, etc.",
 }
 
 MAX_RESULT_LIMIT = 20
@@ -38,17 +50,8 @@ SCHOOL_MODE_TTL = 1800  # 30 min inactivity TTL for school mode
 
 _LLM_SYSTEM_PROMPT = """You translate natural language questions into structured MongoDB filter conditions for a school ERP system.
 
-Available collections:
+Available collections and their filterable fields:
 {collection_descriptions}
-
-Return a JSON object with these fields:
-- "collection": one of the collection names listed above
-- "conditions": an array of filter conditions, each with:
-    - "field": the field name to filter on
-    - "op": the operator ("$eq", "$regex", "$in")
-    - "value": the value to match
-- "fields": array of field names to return (empty array = return all fields)
-- "limit": max results to return (max 20)
 
 Rules:
 - Use "$regex" for partial name/string matching
@@ -56,12 +59,20 @@ Rules:
 - Use "$in" when the question lists multiple values
 - Keep limit small (1-5) for specific lookups, 20 for list queries
 - Return ONLY valid JSON, no explanation, no markdown formatting
+- Use ONLY the exact status/value names listed above. Do not guess or invent values.
+- For fees, use status='Pending' or status='Partial' for due fees. Do NOT use 'due' as a status.
 
 Example 1: "Show me Ansh Sharma's fee balance"
 {{"collection": "school_students", "conditions": [{{"field": "student_name", "op": "$regex", "value": "Ansh Sharma"}}], "fields": ["student_id", "student_name", "admission_no", "class_id"], "limit": 5}}
 
 Example 2: "List all students in class 5"
-{{"collection": "school_students", "conditions": [{{"field": "class_id", "op": "$eq", "value": 26}}], "fields": [], "limit": 20}}"""
+{{"collection": "school_students", "conditions": [{{"field": "class_id", "op": "$eq", "value": 26}}], "fields": [], "limit": 20}}
+
+Example 3: "Show pending fees"
+{{"collection": "school_applied_fees", "conditions": [{{"field": "status", "op": "$eq", "value": "Pending"}}], "fields": [], "limit": 20}}
+
+Example 4: "Which students are active in transport?"
+{{"collection": "school_transport_assign", "conditions": [{{"field": "transport_status", "op": "$eq", "value": "Active"}}], "fields": ["student_id", "vehicle_no", "transport_status"], "limit": 20}}"""
 
 
 _COLLECTION_RELATIONSHIPS = {
@@ -411,7 +422,10 @@ class SchoolDataService:
     @staticmethod
     async def get_school_mode(session_id: str) -> str | None:
         key = get_redis_key(f"school_mode:{session_id}")
-        return await redis_client.get(key)
+        val = await redis_client.get(key)
+        if isinstance(val, bytes):
+            return val.decode()
+        return val
 
     @staticmethod
     async def clear_school_mode(session_id: str) -> None:

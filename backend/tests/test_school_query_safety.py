@@ -53,6 +53,7 @@ class TestValidateCondition(unittest.TestCase):
     def test_accepts_valid_regex_condition(self):
         cond = {"field": "student_name", "op": "$regex", "value": "Ansh"}
         result = validate_condition("school_students", cond)
+        assert result is not None
         self.assertIn("$regex", result["student_name"])
 
     def test_accepts_valid_in_condition(self):

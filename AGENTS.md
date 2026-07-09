@@ -4,7 +4,7 @@ Instructions for AI coding agents working on this codebase.
 
 ## Project Overview
 
-Multi-tenant SaaS platform that lets clients crawl their websites, upload knowledge, and embed an AI-powered chat widget on their site. Uses RAG (Retrieval-Augmented Generation) with hybrid vector + BM25 search.
+Multi-tenant SaaS platform that lets clients crawl their websites, upload knowledge, and embed an AI-powered chat widget on their site. Uses RAG (Retrieval-Augmented Generation) with hybrid vector + BM25 search. Includes a **School ERP Module** for multi-tenant school data (students, fees, transport, hostel) with query safety and `/school` chat commands.
 
 ## Tech Stack
 
@@ -115,7 +115,7 @@ open backend/templates/test_page.html
 |---|---|
 | `backend/core/config.py` | Pydantic Settings, env variable loading |
 | `backend/core/auth.py` | JWT creation/verification, API key auth, rate limiter |
-| `backend/services/chat_service.py` | Core chat pipeline (classify, search, answer, tool calling for lead forms, log gaps, personalized greeting) — all conversation queries scoped by `(session_id, tenant_id)` |
+| `backend/services/chat_service.py` | Core chat pipeline (classify, search, answer, tool calling for lead forms, log gaps, personalized greeting, school mode `/school`/`/exit`/`/logout`) — all conversation queries scoped by `(session_id, tenant_id)` |
 | `backend/services/vector_search.py` | Hybrid vector + BM25 search |
 | `backend/services/ingestion.py` | Document chunking/embedding pipeline |
 | `backend/services/embedder.py` | OpenAI embeddings via LangChain `OpenAIEmbeddings` |
@@ -135,7 +135,7 @@ open backend/templates/test_page.html
 | `backend/core/rate_limiter.py` | Redis-based sliding window rate limiter (per-IP, per-tenant, per-session) |
 | `apps/widget/src/components/ErrorBoundary.tsx` | React error boundary preventing widget crashes from killing WebSocket |
 | `apps/widget/src/components/EnquiryForm.tsx` | Dynamic lead form component rendered via LLM tool calling |
-| `backend/core/schema_validator.py` | MongoDB JSON schema validators (18 collections) |
+| `backend/core/schema_validator.py` | MongoDB JSON schema validators (29 collections) |
 | `apps/widget/src/Widget.tsx` | Main widget component (WebSocket streaming) |
 | `apps/widget/src/index.tsx` | Widget bootstrapper (reads `data-api-key` from script tag) |
 | `apps/dashboard/src/App.tsx` | Dashboard router with private/admin routes |
@@ -149,10 +149,20 @@ open backend/templates/test_page.html
 | `backend/controllers/visitor_profiles.py` | Dashboard JWT-authenticated routes for profile CRUD, visitor identity management |
 | `backend/controllers/conversations.py` | Dashboard JWT-authenticated conversation detail + full history (merges DO Spaces archive) endpoints |
 | `packages/shared/src/types.ts` | Shared TypeScript interfaces (includes VisitorProfile, Visitor, LeadFormField with field_role) |
+| `scripts/seed_school_data.py` | Excel → MongoDB seeder for school ERP data (CLI: `--source-file`, `--dev`) |
+| `backend/services/school_data_service.py` | NL→MongoDB query engine for school data, audit logging, session management, fee summary |
+| `backend/services/school_data_filter.py` | Query safety allowlists + `build_safe_filter()` for school collections |
+| `backend/models/school_data.py` | Pydantic v2 schemas for all 10 school entities + audit log |
+| `backend/repositories/school_repository.py` | CRUD for schools, classes, sections |
+| `backend/repositories/school_student_repository.py` | CRUD for students (search, get by admission, by class) |
+| `backend/repositories/school_fee_repository.py` | CRUD for applied_fees + payments |
+| `backend/repositories/school_transport_repository.py` | CRUD for routes, stops, transport_assign |
+| `backend/repositories/school_hostel_repository.py` | CRUD for hostel_assign |
+| `backend/tests/test_school_query_safety.py` | 16 unit tests for query safety |
 
 ## Database Collections
 
-`tenants`, `sources`, `crawl_jobs`, `source_jobs`, `faqs`, `documents`, `chunks`, `parents`, `pages`, `leads`, `lead_form_configs`, `conversations`, `visitors`, `message_feedback`, `knowledge_gaps`, `visitor_profiles`
+`tenants`, `sources`, `crawl_jobs`, `source_jobs`, `faqs`, `documents`, `chunks`, `parents`, `pages`, `leads`, `lead_form_configs`, `conversations`, `visitors`, `message_feedback`, `knowledge_gaps`, `visitor_profiles`, `school_teachers`, `school_classes`, `school_sections`, `school_students`, `school_applied_fees`, `school_payments`, `school_routes`, `school_stops`, `school_transport_assign`, `school_hostel_assign`, `school_audit_log`
 
 ## Environment Variables
 

@@ -1272,3 +1272,150 @@ A separate staging environment mirrors production for pre-release testing.
 | `message_feedback` | Like/dislike feedback on AI responses |
 | `knowledge_gaps` | Unanswered queries with embeddings, gap_type, and similarity clustering |
 | `visitor_profiles` | Tenant-defined visitor profiles (name, description, response instructions, enabled) |
+| `school_teachers` | School teacher data |
+| `school_classes` | School class definitions |
+| `school_sections` | School section definitions |
+| `school_students` | School student records (linked to tenant_id, class_id, section_id) |
+| `school_applied_fees` | Fee structures per student |
+| `school_payments` | Payment transactions per student |
+| `school_routes` | School transport routes |
+| `school_stops` | Transport stops |
+| `school_transport_assign` | Student-route-stop assignments |
+| `school_hostel_assign` | Student hostel room assignments |
+| `school_audit_log` | School ERP audit trail |
+
+---
+
+## School ERP Module
+
+Multi-tenant school ERP data integration — upload Excel sheets with student, fee, transport, and hostel data, seed it into MongoDB, and query it via chatbot using `/school` commands.
+
+### Architecture
+
+```mermaid
+graph TD
+    A[Excel File<br/>sample_data/school_erp_sample.xlsx] -->|seed_school_data.py| B[(MongoDB)]
+    B --> C[School Data Service]
+    D[User: /school] -->|email:password| E[Chat Service]
+    E -->|verify credentials<br/>against db.tenants| F{Auth OK?}
+    F -->|Yes| G[Activate School Mode]
+    F -->|No| H[Return Error / Lock]
+    G --> C
+    C -->|LLM proposes filters| I[Query Safety Layer]
+    I -->|validate against<br/>allowlists| J{Safe?}
+    J -->|Yes| K[MongoDB Query]
+    J -->|No| L[Reject]
+    K -->|Decimal128 → string| M[Return Results]
+```
+
+### Authentication Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Widget
+    participant Chat Service
+    participant MongoDB
+
+    User->>Widget: /school
+    Widget->>Chat Service: Handle school login
+    Chat Service->>User: "Enter email:password"
+    User->>Widget: admin@abc.com:pass123
+    Widget->>Chat Service: Parse credentials
+    Chat Service->>MongoDB: Find tenant by email + verify password
+    MongoDB-->>Chat Service: Tenant found (or not)
+    
+    alt Credentials Valid
+        Chat Service->>Chat Service: Check widget_tenant == user_tenant
+        alt Cross-tenant match
+            Chat Service->>Redis: Store school_mode (tenant_id, 30min TTL)
+            Chat Service-->>Widget: "School mode activated"
+        else Cross-tenant mismatch
+            Chat Service-->>Widget: "Access denied"
+        end
+    else Invalid credentials
+        Chat Service->>Chat Service: Increment failure count
+        alt 5 failures in 30 min
+            Chat Service-->>Widget: "Account locked"
+        else
+            Chat Service-->>Widget: "Invalid credentials"
+        end
+    end
+```
+
+### Query Safety Architecture
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant LLM
+    participant Query Safety Layer
+    participant MongoDB
+
+    User->>LLM: "Show pending fees for Class 10"
+    LLM->>LLM: Propose filter conditions
+    LLM-->>Query Safety Layer: {collection: "school_applied_fees", filter: {status: "Pending", class_id: "..."}}
+    Query Safety Layer->>Query Safety Layer: Check allowlist
+    Query Safety Layer->>Query Safety Layer: Inject tenant_id (never from LLM)
+    Query Safety Layer->>MongoDB: Safe query
+    MongoDB-->>Query Safety Layer: Results (Decimal128 serialized)
+    Query Safety Layer-->>User: Formatted response
+```
+
+**Allowlisted Fields per Collection:**
+
+| Collection | Allowed Filter Fields |
+|---|---|
+| `school_students` | `tenant_id`, `class_id`, `section_id`, `admission_no`, `first_name`, `status` |
+| `school_applied_fees` | `tenant_id`, `student_id`, `status` (`Pending`, `Partial`, `Paid`), `due_date` |
+| `school_payments` | `tenant_id`, `student_id`, `mode`, `reference_no` |
+| `school_transport_assign` | `tenant_id`, `student_id`, `stop_id`, `route_id`, `status` (`Active`, `Inactive`) |
+| `school_hostel_assign` | `tenant_id`, `student_id`, `room_no`, `block`, `status` (`Active`, `Vacated`) |
+
+### Data Seeding
+
+```mermaid
+flowchart LR
+    A[Excel File] -->|10 sheets| B[Seeder Script]
+    B -->|Read rows| C{Sheet Name}
+    C -->|School| D[school_teachers]
+    C -->|Classes| E[school_classes]
+    C -->|Sections| F[school_sections]
+    C -->|Students| G[school_students]
+    C -->|Applied Fees| H[school_applied_fees]
+    C -->|Payments| I[school_payments]
+    C -->|Routes| J[school_routes]
+    C -->|Stops| K[school_stops]
+    C -->|Transport Assign| L[school_transport_assign]
+    C -->|Hostel Assign| M[school_hostel_assign]
+```
+
+**Running the Seeder:**
+```bash
+# Seed sample data to MongoDB
+python scripts/seed_school_data.py --source-file sample_data/school_erp_sample.xlsx
+
+# Seed with dev credentials printed to console
+python scripts/seed_school_data.py --source-file sample_data/school_erp_sample.xlsx --dev
+```
+
+### Using School Mode in Chat
+
+1. **Activate**: Type `/school` in the widget
+2. **Authenticate**: Enter `email:password` (e.g., `admin@abc.com:pass123`)
+3. **Query**: Ask natural language questions:
+   - "Show pending fees for Class 10"
+   - "List all students in Section A"
+   - "Transport status for student John"
+4. **Exit**: Type `/exit` or `/logout` to leave school mode (also auto-exits after 30 min inactivity)
+
+### Key Files
+
+| File | Purpose |
+|---|---|
+| `scripts/seed_school_data.py` | Excel → MongoDB seeder (CLI: `--source-file`, `--dev`) |
+| `backend/services/school_data_service.py` | NL→MongoDB query engine, audit logging, session management |
+| `backend/services/school_data_filter.py` | Query safety allowlists + `build_safe_filter()` |
+| `backend/models/school_data.py` | Pydantic v2 schemas for all 10 entities |
+| `backend/repositories/school_*.py` | CRUD repositories per entity |
+| `backend/tests/test_school_query_safety.py` | 16 unit tests for query safety |
