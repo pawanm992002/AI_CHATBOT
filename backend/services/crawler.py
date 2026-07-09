@@ -198,6 +198,7 @@ async def _batch_scrape_with_firecrawl(urls: list[str]) -> list[dict]:
             json={
                 "urls": urls,
                 "formats": ["markdown"],
+                "onlyMainContent": False,
             }
         )
         print(f"[FIRECRAWL] POST /v2/batch/scrape status={batch_response.status_code}")
