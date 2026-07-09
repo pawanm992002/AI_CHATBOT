@@ -420,6 +420,216 @@ COLLECTION_SCHEMAS = {
         "validationLevel": "moderate",
         "validationAction": "error",
     },
+    # --- School ERP collections (all scoped by tenant_id) ---
+    "schools": {
+        "validator": {
+            "$jsonSchema": {
+                "bsonType": "object",
+                "required": ["school_id", "tenant_id", "school_name"],
+                "properties": {
+                    "school_id": {"bsonType": "int"},
+                    "tenant_id": {"bsonType": "string"},
+                    "school_name": {"bsonType": "string"},
+                },
+            }
+        },
+        "validationLevel": "moderate",
+        "validationAction": "error",
+    },
+    "school_classes": {
+        "validator": {
+            "$jsonSchema": {
+                "bsonType": "object",
+                "required": ["class_id", "tenant_id", "school_id", "class_name"],
+                "properties": {
+                    "class_id": {"bsonType": "int"},
+                    "tenant_id": {"bsonType": "string"},
+                    "school_id": {"bsonType": "int"},
+                    "class_name": {"bsonType": "string"},
+                },
+            }
+        },
+        "validationLevel": "moderate",
+        "validationAction": "error",
+    },
+    "school_sections": {
+        "validator": {
+            "$jsonSchema": {
+                "bsonType": "object",
+                "required": ["section_id", "tenant_id", "school_id", "class_id", "section_name"],
+                "properties": {
+                    "section_id": {"bsonType": "int"},
+                    "tenant_id": {"bsonType": "string"},
+                    "school_id": {"bsonType": "int"},
+                    "class_id": {"bsonType": "int"},
+                    "section_name": {"bsonType": "string"},
+                },
+            }
+        },
+        "validationLevel": "moderate",
+        "validationAction": "error",
+    },
+    "school_students": {
+        "validator": {
+            "$jsonSchema": {
+                "bsonType": "object",
+                "required": ["student_id", "tenant_id", "school_id", "admission_no", "student_name", "father_name", "mother_name", "gender", "blood_group", "category", "address", "class_id", "section_id"],
+                "properties": {
+                    "student_id": {"bsonType": "int"},
+                    "tenant_id": {"bsonType": "string"},
+                    "school_id": {"bsonType": "int"},
+                    "admission_no": {"bsonType": "string"},
+                    "student_name": {"bsonType": "string"},
+                    "father_name": {"bsonType": "string"},
+                    "mother_name": {"bsonType": "string"},
+                    "gender": {"bsonType": "string"},
+                    "blood_group": {"bsonType": "string"},
+                    "category": {"bsonType": "string"},
+                    "address": {"bsonType": "string"},
+                    "class_id": {"bsonType": "int"},
+                    "section_id": {"bsonType": "int"},
+                },
+            }
+        },
+        "validationLevel": "moderate",
+        "validationAction": "error",
+    },
+    "school_routes": {
+        "validator": {
+            "$jsonSchema": {
+                "bsonType": "object",
+                "required": ["route_id", "tenant_id", "school_id", "route_name", "route_code"],
+                "properties": {
+                    "route_id": {"bsonType": "int"},
+                    "tenant_id": {"bsonType": "string"},
+                    "school_id": {"bsonType": "int"},
+                    "route_name": {"bsonType": "string"},
+                    "route_code": {"bsonType": "string"},
+                },
+            }
+        },
+        "validationLevel": "moderate",
+        "validationAction": "error",
+    },
+    "school_stops": {
+        "validator": {
+            "$jsonSchema": {
+                "bsonType": "object",
+                "required": ["stop_id", "tenant_id", "school_id", "route_id", "stop_name"],
+                "properties": {
+                    "stop_id": {"bsonType": "int"},
+                    "tenant_id": {"bsonType": "string"},
+                    "school_id": {"bsonType": "int"},
+                    "route_id": {"bsonType": "int"},
+                    "stop_name": {"bsonType": "string"},
+                },
+            }
+        },
+        "validationLevel": "moderate",
+        "validationAction": "error",
+    },
+    "school_transport_assign": {
+        "validator": {
+            "$jsonSchema": {
+                "bsonType": "object",
+                "required": ["transport_id", "tenant_id", "school_id", "student_id", "route_id", "stop_id", "vehicle_no", "transport_status"],
+                "properties": {
+                    "transport_id": {"bsonType": "int"},
+                    "tenant_id": {"bsonType": "string"},
+                    "school_id": {"bsonType": "int"},
+                    "student_id": {"bsonType": "int"},
+                    "route_id": {"bsonType": "int"},
+                    "stop_id": {"bsonType": "int"},
+                    "vehicle_no": {"bsonType": "string"},
+                    "transport_status": {"bsonType": "string"},
+                },
+            }
+        },
+        "validationLevel": "moderate",
+        "validationAction": "error",
+    },
+    "school_hostel_assign": {
+        "validator": {
+            "$jsonSchema": {
+                "bsonType": "object",
+                "required": ["hostel_id", "tenant_id", "school_id", "student_id", "hostel_name", "room_no", "bed_no", "hostel_status"],
+                "properties": {
+                    "hostel_id": {"bsonType": "int"},
+                    "tenant_id": {"bsonType": "string"},
+                    "school_id": {"bsonType": "int"},
+                    "student_id": {"bsonType": "int"},
+                    "hostel_name": {"bsonType": "string"},
+                    "room_no": {"bsonType": "string"},
+                    "bed_no": {"bsonType": "int"},
+                    "hostel_status": {"bsonType": "string"},
+                },
+            }
+        },
+        "validationLevel": "moderate",
+        "validationAction": "error",
+    },
+    "school_applied_fees": {
+        "validator": {
+            "$jsonSchema": {
+                "bsonType": "object",
+                "required": ["applied_fee_id", "tenant_id", "school_id", "student_id", "fee_head", "amount", "due_date", "concession", "status"],
+                "properties": {
+                    "applied_fee_id": {"bsonType": "int"},
+                    "tenant_id": {"bsonType": "string"},
+                    "school_id": {"bsonType": "int"},
+                    "student_id": {"bsonType": "int"},
+                    "fee_head": {"bsonType": "string"},
+                    "amount": {"bsonType": "decimal"},
+                    "due_date": {"bsonType": "string"},
+                    "concession": {"bsonType": "decimal"},
+                    "status": {"bsonType": "string"},
+                },
+            }
+        },
+        "validationLevel": "moderate",
+        "validationAction": "error",
+    },
+    "school_payments": {
+        "validator": {
+            "$jsonSchema": {
+                "bsonType": "object",
+                "required": ["payment_id", "tenant_id", "school_id", "student_id", "applied_fee_id", "paid_amount", "payment_date", "payment_mode", "receipt_no", "balance"],
+                "properties": {
+                    "payment_id": {"bsonType": "int"},
+                    "tenant_id": {"bsonType": "string"},
+                    "school_id": {"bsonType": "int"},
+                    "student_id": {"bsonType": "int"},
+                    "applied_fee_id": {"bsonType": "int"},
+                    "paid_amount": {"bsonType": "decimal"},
+                    "payment_date": {"bsonType": "string"},
+                    "payment_mode": {"bsonType": "string"},
+                    "receipt_no": {"bsonType": "string"},
+                    "balance": {"bsonType": "decimal"},
+                },
+            }
+        },
+        "validationLevel": "moderate",
+        "validationAction": "error",
+    },
+    # --- School ERP audit log ---
+    "school_data_query_log": {
+        "validator": {
+            "$jsonSchema": {
+                "bsonType": "object",
+                "required": ["log_id", "tenant_id", "session_id", "question", "generated_filter", "timestamp"],
+                "properties": {
+                    "log_id": {"bsonType": "string"},
+                    "tenant_id": {"bsonType": "string"},
+                    "session_id": {"bsonType": "string"},
+                    "question": {"bsonType": "string"},
+                    "generated_filter": {"bsonType": "object"},
+                    "timestamp": {"bsonType": "date"},
+                },
+            }
+        },
+        "validationLevel": "moderate",
+        "validationAction": "error",
+    },
 }
 
 

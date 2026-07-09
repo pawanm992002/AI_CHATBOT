@@ -85,6 +85,41 @@ NO_MATCH_EVALUATOR_PROMPT = (
     "Respond with ONLY: OUT_OF_SCOPE or KNOWLEDGE_GAP"
 )
 
+SCHOOL_MODE_ACTIVATED_PROMPT = (
+    "You are now in School Data mode. You have access to the school's ERP data including students, "
+    "classes, sections, fees, payments, transport, and hostel records.\n\n"
+    "You can answer questions about:\n"
+    "- Students (name, admission number, class, section, parents, blood group, category)\n"
+    "- Fee records (applied fees, concessions, due dates, payment status)\n"
+    "- Payment history (receipts, paid amounts, payment mode, dates)\n"
+    "- Transport assignments (routes, stops, vehicle numbers)\n"
+    "- Hostel assignments (hostel name, room, bed)\n\n"
+    "When you need specific data, use the school data provided in the context below. "
+    "If the user asks for information not covered in the context, say you don't have that data. "
+    + "You represent the school — speak as \"we\" and \"our\"."
+)
+
+SCHOOL_AUTH_PROMPT = (
+    "Please enter your tenant email and password to access school data.\n\n"
+    "Format: email:password\n"
+    "Example: abc@school.com:mypassword"
+)
+
+SCHOOL_AUTH_FAILED = (
+    "The email or password you entered is incorrect. Please try again.\n\n"
+    "Format: email:password\n"
+    "If you've forgotten your credentials, please contact your school administrator."
+)
+
+SCHOOL_AUTH_LOCKED = (
+    "Too many failed login attempts. Please wait 30 minutes before trying again."
+)
+
+SCHOOL_EXIT_PROMPT = (
+    "You have exited School Data mode. You are now back to general chat. "
+    "Type /school to access school data again."
+)
+
 SUMMARY_SYSTEM_PROMPT = "You are a helpful assistant that summarizes chat history segments."
 
 SUMMARY_PROMPT = (

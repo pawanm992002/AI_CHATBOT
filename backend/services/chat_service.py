@@ -16,6 +16,7 @@ from services.vector_search import search_chunks
 from repositories.knowledge_gap_repository import _vector_search_gaps
 from views.responses import ChatSource
 from repositories.lead_repository import LeadFormConfigRepository
+from services.school_data_service import SchoolDataService
 
 from . import chat_prompts as prompts
 from services.archival_service import archival_service
@@ -33,7 +34,11 @@ MAX_REWRITE_HISTORY = 12
 MAX_DEARCHIVE_MESSAGES = 120
 DIRECT_ANSWER_THRESHOLD = 0.0
 
+SCHOOL_LOGIN_ATTEMPT_LIMIT = 5
+SCHOOL_LOGIN_WINDOW = 1800  # 30 minutes lockout window
+
 _form_config_repo = LeadFormConfigRepository()
+_school_data_service = SchoolDataService()
 
 
 class QueryClass(StrEnum):
@@ -87,6 +92,227 @@ class ChatService:
             message["suggested_form_title"] = form_title
         return message
 
+    # ------------------------------------------------------------------
+    # School mode command handling
+    # ------------------------------------------------------------------
+
+    _SCHOOL_CMD = re.compile(r"^/school\s*$", re.IGNORECASE)
+    _EXIT_CMD = re.compile(r"^/(exit|logout)\s*$", re.IGNORECASE)
+    _CREDENTIALS_PATTERN = re.compile(r"^(.+@.+\..+):(.+)$")
+
+    async def _handle_school_flow(
+        self,
+        turn: ChatTurnInput,
+        stream: bool,
+        on_token,
+    ) -> ChatTurnResult | None:
+        """Handle /school, /exit, /logout, and credential submission.
+
+        Returns a ChatTurnResult if the message was handled as a school command,
+        or None if it should continue through the normal pipeline.
+        """
+        q = turn.query.strip()
+        tenant_id = turn.tenant["tenant_id"]
+        session_id = turn.session_id
+
+        school_tenant_id = await _school_data_service.get_school_mode(session_id)
+        pending_auth = await self._get_pending_school_auth(session_id)
+
+        # /exit or /logout
+        if self._EXIT_CMD.match(q):
+            if school_tenant_id:
+                await _school_data_service.clear_school_mode(session_id)
+                await self._clear_pending_school_auth(session_id)
+                msg = prompts.SCHOOL_EXIT_PROMPT
+            else:
+                msg = "You are not in School Data mode."
+            return ChatTurnResult(message_id=turn.message_id, answer=msg, sources=[])
+
+        # /school
+        if self._SCHOOL_CMD.match(q):
+            if school_tenant_id:
+                msg = "You are already in School Data mode. Type /exit to leave."
+                return ChatTurnResult(message_id=turn.message_id, answer=msg, sources=[])
+            await self._set_pending_school_auth(session_id)
+            return ChatTurnResult(
+                message_id=turn.message_id,
+                answer=prompts.SCHOOL_AUTH_PROMPT,
+                sources=[],
+            )
+
+        # If pending auth, treat this message as credential submission
+        if pending_auth:
+            return await self._handle_school_auth(turn, q, stream, on_token)
+
+        # If school mode is active, route through SchoolDataService
+        if school_tenant_id and school_tenant_id == tenant_id:
+            return await self._handle_school_query(turn, school_tenant_id, stream, on_token)
+
+        return None
+
+    async def _handle_school_auth(
+        self,
+        turn: ChatTurnInput,
+        query: str,
+        stream: bool,
+        on_token,
+    ) -> ChatTurnResult:
+        session_id = turn.session_id
+
+        # Check rate limit for failed attempts
+        if await self._is_school_auth_locked(session_id):
+            return ChatTurnResult(
+                message_id=turn.message_id,
+                answer=prompts.SCHOOL_AUTH_LOCKED,
+                sources=[],
+            )
+
+        m = self._CREDENTIALS_PATTERN.match(query)
+        if not m:
+            return ChatTurnResult(
+                message_id=turn.message_id,
+                answer=(
+                    "Please provide credentials in the format: email:password\n"
+                    "Example: abc@school.com:mypassword"
+                ),
+                sources=[],
+            )
+
+        email = m.group(1).strip()
+        password = m.group(2).strip()
+
+        tenant = await db.tenants.find_one({"email": email})
+        if not tenant:
+            await self._increment_school_auth_failed(session_id)
+            return ChatTurnResult(
+                message_id=turn.message_id,
+                answer=prompts.SCHOOL_AUTH_FAILED,
+                sources=[],
+            )
+
+        from core.auth import verify_password
+        if not verify_password(password, tenant.get("password_hash", "")):
+            await self._increment_school_auth_failed(session_id)
+            return ChatTurnResult(
+                message_id=turn.message_id,
+                answer=prompts.SCHOOL_AUTH_FAILED,
+                sources=[],
+            )
+
+        if tenant.get("status") != "approved":
+            return ChatTurnResult(
+                message_id=turn.message_id,
+                answer="Your account is not active. Please contact support.",
+                sources=[],
+            )
+
+        # Cross-tenant guard: the logged-in tenant must match the widget's tenant
+        if tenant["tenant_id"] != turn.tenant["tenant_id"]:
+            return ChatTurnResult(
+                message_id=turn.message_id,
+                answer="This email does not belong to this school. Please use the credentials for the school whose website you're on.",
+                sources=[],
+            )
+
+        # Success - set school mode
+        await _school_data_service.set_school_mode(session_id, tenant["tenant_id"])
+        await self._clear_pending_school_auth(session_id)
+        school_name = tenant.get("business_name") or tenant["domain"]
+        msg = (
+            f"✅ School Data mode activated for **{school_name}**.\n\n"
+            f"You can now ask about students, fees, payments, transport, and more.\n"
+            f"Type /exit to leave School Data mode."
+        )
+        return ChatTurnResult(message_id=turn.message_id, answer=msg, sources=[])
+
+    async def _handle_school_query(
+        self,
+        turn: ChatTurnInput,
+        school_tenant_id: str,
+        stream: bool,
+        on_token,
+    ) -> ChatTurnResult:
+        """Route the query through SchoolDataService and generate an LLM answer."""
+        provider, model = self._tenant_llm_provider_model(turn.tenant)
+
+        school_context = await _school_data_service.query(
+            tenant_id=school_tenant_id,
+            session_id=turn.session_id,
+            question=turn.query,
+            llm_provider=provider,
+            llm_model=model,
+        )
+
+        summary, messages = await self._load_conversation_context(turn.session_id, school_tenant_id)
+        messages.append({"role": "user", "content": turn.query})
+
+        system_prompt = (
+            prompts.SCHOOL_MODE_ACTIVATED_PROMPT + "\n\n"
+            "Here is the relevant school data:\n"
+            f"{school_context}\n\n"
+            "Use this data to answer the user's question. If the data says "
+            "it couldn't find matching records, let the user know."
+        )
+
+        if stream:
+            full_answer = ""
+            usage: dict[str, Any] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "reasoning_tokens": 0, "cached_tokens": 0, "provider": provider, "model": model, "latency_ms": 0.0, "status": "success"}
+            async for item in self._complete_answer_stream(system_prompt, messages, provider, model):
+                if isinstance(item, dict):
+                    full_answer = item["answer"]
+                    usage = item.get("usage", usage)
+                else:
+                    full_answer += item
+                    await on_token(item)
+        else:
+            full_answer, usage = await self._complete_answer(system_prompt, messages, provider, model)
+
+        # Persist conversation (but redact PII from logged school data answers)
+        messages.append(self._assistant_message(full_answer, usage))
+        summary, messages = await self._compact_if_needed(summary, messages, provider, model)
+        await self._persist_conversation(turn, summary, messages)
+        await self._track_visitor_message(turn.session_id, turn.visitor_id or turn.session_id, turn.tenant["tenant_id"])
+
+        return ChatTurnResult(message_id=turn.message_id, answer=full_answer, sources=[])
+
+    # ------------------------------------------------------------------
+    # School auth session helpers (Redis-based)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    async def _get_pending_school_auth(session_id: str) -> bool:
+        key = get_redis_key(f"school_pending_auth:{session_id}")
+        val = await redis_client.get(key)
+        return val == "1"
+
+    @staticmethod
+    async def _set_pending_school_auth(session_id: str) -> None:
+        key = get_redis_key(f"school_pending_auth:{session_id}")
+        await redis_client.setex(key, 300, "1")  # 5 min to enter credentials
+
+    @staticmethod
+    async def _clear_pending_school_auth(session_id: str) -> None:
+        key = get_redis_key(f"school_pending_auth:{session_id}")
+        await redis_client.delete(key)
+
+    @staticmethod
+    async def _is_school_auth_locked(session_id: str) -> bool:
+        key = get_redis_key(f"school_auth_failures:{session_id}")
+        count = await redis_client.get(key)
+        if count and int(count) >= SCHOOL_LOGIN_ATTEMPT_LIMIT:
+            ttl = await redis_client.ttl(key)
+            if ttl > 0:
+                return True
+        return False
+
+    @staticmethod
+    async def _increment_school_auth_failed(session_id: str) -> None:
+        key = get_redis_key(f"school_auth_failures:{session_id}")
+        pipe = redis_client.pipeline()
+        pipe.incr(key)
+        pipe.expire(key, SCHOOL_LOGIN_WINDOW)
+        await pipe.execute()
+
     @staticmethod
     def _build_form_matching_prompt(forms: list[dict]) -> str:
         form_lines = []
@@ -129,6 +355,11 @@ class ChatService:
         tenant_id = turn.tenant["tenant_id"]
         business_name = turn.tenant.get("business_name") or turn.tenant["domain"]
         provider, model = self._tenant_llm_provider_model(turn.tenant)
+
+        # Check for school commands first
+        school_result = await self._handle_school_flow(turn, stream, on_token)
+        if school_result is not None:
+            return school_result
 
         summary, messages = await self._load_conversation_context(turn.session_id, tenant_id)
         classification = await self._classify_query(turn.query, summary, messages, provider, model)
