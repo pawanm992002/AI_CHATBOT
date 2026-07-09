@@ -337,6 +337,14 @@ class ChatService:
                 full_answer += item
                 await on_token(item)
 
+        if not form_id:
+            gap_type = await self._evaluate_answer_sufficiency(
+                turn.query, full_answer, turn.tenant.get("description"),
+                tenant_ai_provider, tenant_ai_model,
+            )
+            if gap_type != "sufficient":
+                await self._log_knowledge_gap(tenant_id, turn.query, turn.current_url, gap_type, turn.message_id)
+
         messages.append(self._assistant_message(full_answer, usage, form_id, form_title))
         summary, messages = await self._compact_if_needed(summary, messages, tenant_ai_provider, tenant_ai_model)
         await self._persist_conversation(turn, summary, messages)
@@ -417,6 +425,20 @@ class ChatService:
         tenant_ai_provider, tenant_ai_model = self._tenant_llm_provider_model(turn.tenant)
 
         answer, usage = await self._complete_answer(system_prompt, messages, tenant_ai_provider, tenant_ai_model)
+
+        if not form_id:
+            async def _log_gap_bg():
+                try:
+                    gap_type = await self._evaluate_answer_sufficiency(
+                        turn.query, answer, turn.tenant.get("description"),
+                        tenant_ai_provider, tenant_ai_model,
+                    )
+                    if gap_type != "sufficient":
+                        await self._log_knowledge_gap(tenant_id, turn.query, turn.current_url, gap_type, turn.message_id)
+                except Exception as e:
+                    print(f"[CHAT] Answer sufficiency evaluation failed: {e}")
+            asyncio.ensure_future(_log_gap_bg())
+
         messages.append(self._assistant_message(answer, usage, form_id, form_title))
 
         summary, messages = await self._compact_if_needed(summary, messages, tenant_ai_provider, tenant_ai_model)
@@ -775,6 +797,25 @@ class ChatService:
             return "no_context"
         except Exception:
             return "no_context"
+
+    async def _evaluate_answer_sufficiency(self, query: str, answer: str, description: str | None = None, provider: str = "openai", model: str = "gpt-4o-mini") -> str:
+        business_context = f"\nThis website is about: {description}" if description else ""
+        try:
+            llm = get_llm(provider, model)
+            resp = await llm.ainvoke(
+                [
+                    {"role": "system", "content": prompts.NO_MATCH_EVALUATOR_WITH_ANSWER_PROMPT.format(business_context=business_context)},
+                    {"role": "user", "content": f"Query: {query}\n\nAnswer: {answer}"},
+                ]
+            )
+            result = (resp.content or "").strip().upper()
+            if "SUFFICIENT" in result:
+                return "sufficient"
+            if "OUT_OF_SCOPE" in result:
+                return "out_of_scope"
+            return "no_context"
+        except Exception:
+            return "sufficient"
 
     async def _log_knowledge_gap(self, tenant_id: str, query: str, url: str, gap_type: str, message_id: str) -> None:
         try:
