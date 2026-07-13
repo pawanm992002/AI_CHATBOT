@@ -228,81 +228,39 @@ class SchoolDataService:
         Returns a formatted string suitable for injection into chat context.
         Logs every query call to school_data_query_log for audit.
         """
-        coll_desc_lines = "\n".join(
-            f'- "{k}": {v}' for k, v in COLLECTION_DESCRIPTIONS.items()
-        )
-        system_prompt = _LLM_SYSTEM_PROMPT.format(
-            collection_descriptions=coll_desc_lines,
-        )
+        from services.school_agent.graph import graph
+        from langchain_core.messages import HumanMessage
 
-        llm = get_llm(llm_provider, llm_model)
-        resp = await llm.ainvoke([
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": question},
-        ])
+        initial_state = {
+            "messages": [HumanMessage(content=question)],
+            "tenant_id": tenant_id,
+            "school_session_id": session_id,
+            "original_question": question,
+        }
 
-        raw = (resp.content or "").strip()
-        parsed = self._parse_llm_response(raw)
-        if not parsed:
-            return "I couldn't understand how to look up that information. Could you rephrase your question?"
+        config = {
+            "configurable": {
+                "thread_id": session_id,
+                "tenant_id": tenant_id,
+                "session_id": session_id,
+                "question": question,
+                "llm_provider": llm_provider,
+                "llm_model": llm_model,
+            }
+        }
 
-        collection = parsed["collection"]
-        conditions = parsed.get("conditions", [])
-        fields = parsed.get("fields", [])
-        limit = min(parsed.get("limit", MAX_RESULT_LIMIT), MAX_RESULT_LIMIT)
+        result = await graph.ainvoke(initial_state, config=config)
 
-        safe_filter = build_safe_filter(collection, conditions, tenant_id)
+        # Check for interrupts (approval required)
+        if "__interrupt__" in result and result["__interrupt__"]:
+            interrupt_val = result["__interrupt__"][0].value
+            return f"[APPROVAL_REQUIRED]: {interrupt_val.get('message', 'Write action approval requested.')}"
 
-        # Log the query for audit
-        await self._log_query(tenant_id, session_id, question, safe_filter)
+        messages = result.get("messages", [])
+        if messages:
+            return messages[-1].content
 
-        projection = {f: 1 for f in fields} if fields else {"_id": 0}
-        projection["_id"] = 0
-
-        cursor = db[collection].find(safe_filter, projection).limit(limit)
-        results = await cursor.to_list(length=limit)
-
-        if not results:
-            return f"I couldn't find any data matching your query in the {collection.replace('school_', '')} records."
-
-        # Serialize Decimal128 to string for JSON-safe output
-        results = self._serialize_results(results)
-
-        # Check for ambiguous entity resolution
-        if collection == "school_students" and len(results) > 1:
-            return self._format_ambiguous_students(results)
-
-        # Format results
-        answer_parts = []
-        answer_parts.append(self._format_results(collection, results))
-
-        # Chain follow-up queries (up to MAX_CHAIN_DEPTH)
-        chain_depth = 0
-        seen_collections = {collection}
-        for rel in _COLLECTION_RELATIONSHIPS.get(collection, []):
-            if chain_depth >= MAX_CHAIN_DEPTH:
-                break
-            child_collection = rel["collection"]
-            if child_collection in seen_collections:
-                continue
-            link_field = rel["link_field"]
-            child_results = await self._fetch_related(
-                tenant_id, child_collection, link_field, results, rel["label"],
-            )
-            if child_results:
-                answer_parts.append(child_results)
-                seen_collections.add(child_collection)
-                chain_depth += 1
-
-        # Compute fee summary (server-side reconciliation) when student data was queried
-        if collection == "school_students" and len(results) == 1:
-            student_id = results[0].get("student_id")
-            if student_id is not None:
-                fee_summary = await self._compute_fee_summary(tenant_id, student_id)
-                if fee_summary:
-                    answer_parts.append(fee_summary)
-
-        return "\n\n".join(answer_parts)
+        return "I couldn't find any information for that question."
 
     def _parse_llm_response(self, raw: str) -> dict | None:
         """Extract JSON from LLM response, trying multiple parsing strategies."""

@@ -45,16 +45,20 @@ FIELD_ALLOWLIST: dict[str, dict[str, list[str]]] = {
         "allowed_ops": ["$eq", "$regex", "$in"],
     },
     "school_hostel_assign": {
-        "allowed_fields": ["hostel_id", "student_id", "hostel_name", "room_no", "transport_status"],
+        "allowed_fields": ["hostel_id", "student_id", "hostel_name", "room_no", "bed_no", "hostel_status", "transport_status", "block"],
         "allowed_ops": ["$eq", "$regex", "$in"],
     },
     "school_applied_fees": {
-        "allowed_fields": ["applied_fee_id", "student_id", "fee_head", "amount", "status"],
+        "allowed_fields": ["applied_fee_id", "student_id", "fee_head", "amount", "concession", "status", "due_date"],
         "allowed_ops": ["$eq", "$in"],
     },
     "school_payments": {
         "allowed_fields": ["payment_id", "student_id", "applied_fee_id", "payment_mode", "receipt_no"],
         "allowed_ops": ["$eq", "$in"],
+    },
+    "school_teachers": {
+        "allowed_fields": ["teacher_id", "teacher_name", "school_id", "email", "status"],
+        "allowed_ops": ["$eq", "$regex", "$in"],
     },
 }
 
