@@ -148,7 +148,7 @@ async def chat(
     return ChatResponse(
         message_id=result.message_id,
         answer=result.answer,
-        sources=result.sources,
+        sources=result.sources[:4],
         suggested_form_id=result.suggested_form_id,
         suggested_form_title=result.suggested_form_title,
     )
@@ -336,7 +336,7 @@ async def websocket_chat(websocket: WebSocket, key_hash: str = Query(...)):
             if result.sources:
                 await websocket.send_json({
                     "type": "sources",
-                    "data": [source.model_dump() for source in result.sources],
+                    "data": [source.model_dump() for source in result.sources[:4]],
                 })
 
             if result.suggested_form_id:
