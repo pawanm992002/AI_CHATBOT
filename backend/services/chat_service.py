@@ -362,7 +362,7 @@ class ChatService:
             return school_result
 
         summary, messages = await self._load_conversation_context(turn.session_id, tenant_id)
-        classification = await self._classify_query(turn.query, summary, messages, provider, model)
+        classification = await self._classify_query(turn.query, summary, messages, provider, model, turn.tenant)
 
         if classification == QueryClass.GREETING:
             return await self._handle_greeting(turn, business_name, tenant_id)
@@ -678,21 +678,45 @@ class ChatService:
 
         return ChatTurnResult(message_id=turn.message_id, answer=answer, sources=sources, suggested_form_id=form_id, suggested_form_title=form_title)
 
-    async def _classify_query(self, query: str, summary: str, messages: list[dict], provider: str = "openai", model: str = "gpt-4o-mini") -> QueryClass:
+    async def _classify_query(
+        self,
+        query: str,
+        summary: str,
+        messages: list[dict],
+        provider: str = "openai",
+        model: str = "gpt-4o-mini",
+        tenant: dict | None = None,
+    ) -> QueryClass:
         q = query.strip()
         if self._is_greeting(q):
             return QueryClass.GREETING
+
+        if tenant and self._query_mentions_tenant(q, tenant):
+            return QueryClass.PROCEED
 
         conversation_text = self._recent_conversation_text(summary, messages)
         user_prompt = q
         if conversation_text:
             user_prompt = f"Conversation so far:\n{conversation_text}\n\nLatest user message: {q}"
 
+        system_prompt = prompts.QUERY_CLASSIFIER_PROMPT
+        if tenant:
+            business_name = tenant.get("business_name") or tenant.get("domain") or "this business"
+            domain = tenant.get("domain") or ""
+            description = tenant.get("description") or ""
+            system_prompt += (
+                f"\n\nBusiness context:\n"
+                f"- Name: {business_name}\n"
+                f"- Domain: {domain}\n"
+                f"- Description: {description}\n"
+                "If the user's query mentions the business name, domain, acronym, brand, or a term from this context, return PROCEED."
+            )
+
         try:
             llm = get_llm(provider, model)
             resp = await llm.ainvoke(
                 [
-                    {"role": "system", "content": prompts.QUERY_CLASSIFIER_PROMPT},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ]
             )
@@ -700,6 +724,36 @@ class ChatService:
             return QueryClass(label) if label in QueryClass.__members__ else QueryClass.PROCEED
         except Exception:
             return QueryClass.PROCEED
+
+    def _query_mentions_tenant(self, query: str, tenant: dict) -> bool:
+        query_norm = self._normalize_match_text(query)
+        if not query_norm:
+            return False
+
+        query_tokens = set(query_norm.split())
+        for term in self._tenant_match_terms(tenant):
+            term_norm = self._normalize_match_text(term)
+            if not term_norm:
+                continue
+            if " " in term_norm and term_norm in query_norm:
+                return True
+            if " " not in term_norm and term_norm in query_tokens:
+                return True
+        return False
+
+    def _tenant_match_terms(self, tenant: dict) -> set[str]:
+        terms: set[str] = set()
+        for key in ("business_name", "domain"):
+            value = (tenant.get(key) or "").strip()
+            if not value:
+                continue
+            terms.add(value)
+            terms.update(re.findall(r"\(([^)]+)\)", value))
+            terms.update(part for part in re.split(r"[^A-Za-z0-9]+", value) if len(part) >= 3)
+        return terms
+
+    def _normalize_match_text(self, value: str) -> str:
+        return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
 
     async def _rewrite_search_query(self, query: str, summary: str, messages: list[dict], provider: str = "openai", model: str = "gpt-4o-mini", profiles: list[dict] | None = None, forms: list[dict] | None = None) -> tuple[str, str | None, str, str]:
         conversation_text = self._recent_conversation_text(summary, messages)

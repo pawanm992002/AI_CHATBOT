@@ -4,6 +4,7 @@ QUERY_CLASSIFIER_PROMPT = (
     "GREETING - greetings, thanks, acknowledgement, goodbye, or small talk.\n"
     "OUT_OF_SCOPE - clearly unrelated to the company/business, such as sports, politics, jokes, coding, weather, or trivia.\n"
     "PROCEED - any question that could relate to the company, courses, exams, fees, dates, results, locations, scholarships, services, or support. This includes clear standalone questions, ambiguous queries, Hinglish, and follow-ups that need conversation history.\n\n"
+    "If business context is provided, treat mentions of the business name, domain, acronym, brand, or related terms as PROCEED.\n"
     "When unsure whether a query may relate to the company, do not choose OUT_OF_SCOPE.\n"
     "Return only: GREETING, OUT_OF_SCOPE, or PROCEED."
 )
