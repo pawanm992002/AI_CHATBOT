@@ -1,3 +1,4 @@
+import { useRef, useEffect } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { Palette } from '../utils/theme';
 
@@ -11,8 +12,17 @@ interface HeaderProps {
 }
 
 export function Header({ palette, onClose, onNewSession, onHistory, onPointerDown, profileColor }: HeaderProps) {
+  const headerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (headerRef.current && onPointerDown) {
+      headerRef.current.style.setProperty('touch-action', 'none', 'important');
+    }
+  }, [onPointerDown]);
+
   return (
-    <div 
+    <div
+      ref={headerRef}
       className="px-5 py-4 flex justify-between items-center shrink-0"
       onPointerDown={onPointerDown}
       style={{

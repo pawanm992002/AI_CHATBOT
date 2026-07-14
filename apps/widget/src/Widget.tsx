@@ -140,26 +140,8 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
     return () => clearTimeout(timer);
   }, [messages, isLoading]);
 
-  // Lock body scroll when widget opens on mobile
-  useEffect(() => {
-    if (isMobile && isOpen) {
-      const prev = {
-        overflow: document.body.style.overflow,
-        touchAction: document.body.style.touchAction,
-        overscrollBehavior: document.body.style.overscrollBehavior,
-      };
-      document.body.style.overflow = 'hidden';
-      document.body.style.touchAction = 'none';
-      document.body.style.overscrollBehavior = 'none';
-      return () => {
-        document.body.style.overflow = prev.overflow;
-        document.body.style.touchAction = prev.touchAction;
-        document.body.style.overscrollBehavior = prev.overscrollBehavior;
-      };
-    }
-  }, [isMobile, isOpen]);
-
   // Intercept native touchstart/touchmove to prevent the browser from stealing the gesture
+  // Uses capture phase so it fires before any host-page listeners (which may call stopImmediatePropagation)
   // This is necessary because preventDefault() on pointer events has no effect on scrolling per W3C spec
   useEffect(() => {
     const preventTouch = (e: TouchEvent) => {
@@ -167,7 +149,7 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
         e.preventDefault();
       }
     };
-    const opts: AddEventListenerOptions = { passive: false };
+    const opts: AddEventListenerOptions = { capture: true, passive: false };
     document.addEventListener('touchstart', preventTouch, opts);
     document.addEventListener('touchmove', preventTouch, opts);
     return () => {

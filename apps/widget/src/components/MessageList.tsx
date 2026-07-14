@@ -51,7 +51,7 @@ export function MessageList({
     <div
       ref={scrollRef}
       className="flex-1 p-4 overflow-y-auto flex flex-col gap-2.5"
-      style={{ backgroundColor: palette.msgAreaBg }}
+      style={{ backgroundColor: palette.msgAreaBg, overscrollBehavior: 'contain' }}
     >
       {/* Empty state — suggested questions */}
       {messages.length === 0 && suggestedQuestions.length > 0 && (
