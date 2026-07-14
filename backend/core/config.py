@@ -69,6 +69,7 @@ class Settings(BaseSettings):
     DO_SPACES_ENDPOINT: str = ""
     GROQ_API_KEY: str = ""
     OPENROUTER_API_KEY: str = ""
+    SCHOOL_WRITE_ACTIONS_ENABLED: bool = False
 
     model_config = SettingsConfigDict(
         env_file=env_file_path, 

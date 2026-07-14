@@ -200,6 +200,9 @@ DO_SPACES_ACCESS_KEY=your-access-key
 DO_SPACES_SECRET_KEY=your-secret-key
 DO_SPACES_ENDPOINT=https://your-region.digitaloceanspaces.com
 
+# School ERP write actions (disabled by default)
+SCHOOL_WRITE_ACTIONS_ENABLED=False
+
 # LLM Providers (optional — enables multi-provider support)
 GROQ_API_KEY=gsk_your-groq-api-key-here
 OPENROUTER_API_KEY=sk-or-your-openrouter-api-key-here
@@ -688,6 +691,7 @@ sequenceDiagram
 - **One-click resolve** — Tenants can write an answer and select a FAQ source directly from the Knowledge Gaps page. The backend creates the FAQ pair, indexes it into the vector search pipeline, and marks the gap as resolved.
 - **Cleanup duplicates** — One-click button to merge duplicate gaps with identical normalized text.
 - **Union-Find clustering** — The re-cluster endpoint uses an efficient Union-Find algorithm to group similar gaps into clusters.
+- **Answered query evaluation** — The system now also evaluates answered queries via `NO_MATCH_EVALUATOR_WITH_ANSWER_PROMPT`, classifying them as `SUFFICIENT`, `OUT_OF_SCOPE`, or `NO_CONTEXT` — closing the gap where previously only unanswered queries were classified.
 
 ### Dashboard Page
 
@@ -1055,6 +1059,8 @@ The embeddable chat widget (`apps/widget/`) is built as a self-executing IIFE bu
 - **WebSocket streaming** — Real-time token-by-token responses via `/ws/chat`
 - **Chat history persistence** — Stored in `sessionStorage` with 24-hour expiry
 - **Session management** — `chat_session_id` cookie for conversation continuity
+- **Session History panel** — Clock icon in header opens full-height searchable history of past sessions
+- **New Chat button** — "+" button in header resets current session while preserving visitor identity
 - **Enquiry form** — Dynamic lead capture form via LLM tool calling (configurable via dashboard Form Builder)
 - **Like/dislike feedback** — Thumbs-up/down on every AI response
 - **Suggested questions** — Clickable chips shown on empty chat
@@ -1292,6 +1298,8 @@ Multi-tenant school ERP data integration — upload Excel sheets with student, f
 
 ### Architecture
 
+The school data query pipeline now uses a **LangGraph agent** for multi-step reasoning, tool execution, and human-in-the-loop write approval.
+
 ```mermaid
 graph TD
     A[Excel File<br/>sample_data/school_erp_sample.xlsx] -->|seed_school_data.py| B[(MongoDB)]
@@ -1301,12 +1309,31 @@ graph TD
     F -->|Yes| G[Activate School Mode]
     F -->|No| H[Return Error / Lock]
     G --> C
-    C -->|LLM proposes filters| I[Query Safety Layer]
-    I -->|validate against<br/>allowlists| J{Safe?}
-    J -->|Yes| K[MongoDB Query]
-    J -->|No| L[Reject]
-    K -->|Decimal128 → string| M[Return Results]
+    C -->|delegates to| I[LangGraph Agent<br/>StateGraph]
+    I -->|3 nodes| J[Agent → Read/Resolve Tools<br/>→ Approval (writes)]
+    J -->|safe filters| K[Query Safety Layer]
+    K -->|validate against<br/>allowlists| L{Safe?}
+    L -->|Yes| M[MongoDB Query]
+    L -->|No| N[Reject]
+    M -->|Decimal128 → string| O[Return Results]
 ```
+
+### LangGraph Agent Flow
+
+The school ERP agent uses a `StateGraph` with 3 nodes:
+
+| Node | Function |
+|------|----------|
+| **agent** | LLM (with 14 tool bindings) plans next action |
+| **read_tools** | Executes read-only queries (students, fees, transport, etc.) |
+| **approval** | Human-in-the-loop via `interrupt()` for write operations |
+
+**Tool categories:**
+- **10 read tools** — query students, classes, sections, teachers, applied fees, payments, routes, stops, transport assignments, hostel assignments
+- **2 resolver tools** — `resolve_student_id`, `resolve_class_id` for fuzzy name→ID lookups
+- **3 write tools** — `update_transport_status`, `update_hostel_status`, `update_fee_status` (guarded by `SCHOOL_WRITE_ACTIONS_ENABLED`, default `False`)
+
+Writes require explicit approval (the graph pauses with `interrupt()` and resumes via `Command(resume={"approved": True})`). All tool invocations are logged to both `school_data_query_log` and `school_audit_log`.
 
 ### Authentication Flow
 
@@ -1345,21 +1372,27 @@ sequenceDiagram
 
 ### Query Safety Architecture
 
+The query safety layer (`school_data_filter.py`) is invoked inside the LangGraph agent's **read_tools** — the LLM proposes filter conditions via tool calls, and the tools apply `build_safe_filter()` before executing the query.
+
 ```mermaid
 sequenceDiagram
     participant User
-    participant LLM
+    participant LangGraph Agent
+    participant Read Tool
     participant Query Safety Layer
     participant MongoDB
 
-    User->>LLM: "Show pending fees for Class 10"
-    LLM->>LLM: Propose filter conditions
-    LLM-->>Query Safety Layer: {collection: "school_applied_fees", filter: {status: "Pending", class_id: "..."}}
-    Query Safety Layer->>Query Safety Layer: Check allowlist
+    User->>LangGraph Agent: "Show pending fees for Class 10"
+    LangGraph Agent->>LangGraph Agent: Resolve entity names → IDs
+    LangGraph Agent->>Read Tool: query_applied_fees(filter: {status: "Pending", class_id: "..."})
+    Read Tool->>Query Safety Layer: build_safe_filter(collection, conditions)
+    Query Safety Layer->>Query Safety Layer: Validate against allowlist
     Query Safety Layer->>Query Safety Layer: Inject tenant_id (never from LLM)
-    Query Safety Layer->>MongoDB: Safe query
-    MongoDB-->>Query Safety Layer: Results (Decimal128 serialized)
-    Query Safety Layer-->>User: Formatted response
+    Query Safety Layer-->>Read Tool: Safe filter
+    Read Tool->>MongoDB: Execute safe query
+    MongoDB-->>Read Tool: Results (Decimal128 serialized)
+    Read Tool-->>LangGraph Agent: Formatted response
+    LangGraph Agent-->>User: Final answer
 ```
 
 **Allowlisted Fields per Collection:**
@@ -1403,19 +1436,25 @@ python scripts/seed_school_data.py --source-file sample_data/school_erp_sample.x
 
 1. **Activate**: Type `/school` in the widget
 2. **Authenticate**: Enter `email:password` (e.g., `admin@abc.com:pass123`)
-3. **Query**: Ask natural language questions:
+3. **Query**: Ask natural language questions. The system supports multi-hop queries that span multiple collections:
    - "Show pending fees for Class 10"
    - "List all students in Section A"
    - "Transport status for student John"
-4. **Exit**: Type `/exit` or `/logout` to leave school mode (also auto-exits after 30 min inactivity)
+   - "Find student Ansh's bus route and stop" (multi-hop: student → transport assign → route → stop)
+4. **Write actions** (requires approval): "Deactivate transport for student Ansh" triggers an `interrupt()` — an admin must approve before execution
+5. **Exit**: Type `/exit` or `/logout` to leave school mode (also auto-exits after 30 min inactivity)
 
 ### Key Files
 
 | File | Purpose |
 |---|---|
 | `scripts/seed_school_data.py` | Excel → MongoDB seeder (CLI: `--source-file`, `--dev`) |
-| `backend/services/school_data_service.py` | NL→MongoDB query engine, audit logging, session management |
+| `backend/services/school_data_service.py` | NL→MongoDB query engine — entry point delegates to LangGraph agent, audit logging, session management, fee summary |
 | `backend/services/school_data_filter.py` | Query safety allowlists + `build_safe_filter()` |
+| `backend/services/school_agent/graph.py` | LangGraph `StateGraph` — 3 nodes (agent, read_tools, approval), human-in-the-loop via `interrupt()` |
+| `backend/services/school_agent/tools.py` | 14 LangChain tools — read (10), resolver (2), write (3) — guarded by env var |
+| `backend/services/school_agent/README.md` | Architecture docs with Mermaid diagram |
 | `backend/models/school_data.py` | Pydantic v2 schemas for all 10 entities |
 | `backend/repositories/school_*.py` | CRUD repositories per entity |
 | `backend/tests/test_school_query_safety.py` | 16 unit tests for query safety |
+| `backend/tests/test_school_agent.py` | 5 integration tests for LangGraph agent |
