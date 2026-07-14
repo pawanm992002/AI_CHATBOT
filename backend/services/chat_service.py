@@ -367,9 +367,6 @@ class ChatService:
         if classification == QueryClass.GREETING:
             return await self._handle_greeting(turn, business_name, tenant_id)
 
-        if classification == QueryClass.OUT_OF_SCOPE:
-            return await self._handle_out_of_scope(turn, summary, messages, business_name, provider, model, tenant_id, stream, on_token)
-
         search_query, profiles, profile_name, form_id, form_title = await self._prepare_search(turn, summary, messages, provider, model, tenant_id)
 
         chunks, top_score = await self._search_chunks(tenant_id, search_query)

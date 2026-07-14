@@ -20,25 +20,23 @@ graph TD
 
 ### 2. Chat Flow (Updated)
 
-The chat endpoint uses a 3-step flow: greeting detection → knowledge search → classification.
+The chat endpoint uses a retrieval-safe flow: greeting detection/classification → query rewrite → knowledge search → context-grounded answer or no-match response. `OUT_OF_SCOPE` classification does **not** skip retrieval; it is only used as the fallback response type when no relevant knowledge is found.
 
 ```mermaid
 sequenceDiagram
     participant User as Website Visitor
     participant Widget as Chat Widget
     participant API as FastAPI Backend
-    participant Regex as Greeting Detector
-    participant Vector as Vector Search
     participant Classifier as gpt-4o-mini
+    participant Vector as Vector Search
     participant GPT as gpt-4o
 
     User->>Widget: Types a message
     Widget->>API: POST /chat { query, session_id, visitor_id, api_key }
     
-    Step 1: Regex Greeting Check
-    API->>Regex: Check if greeting (hi, hello, etc.)
+    Step 1: Greeting / Scope Classification
+    API->>Classifier: Classify as GREETING, OUT_OF_SCOPE, or PROCEED
     alt Is greeting
-        Regex-->>API: Match found
         alt Has visitor identity name
             API->>DB: Lookup visitor identity
             DB-->>API: {name: "John"}
@@ -48,7 +46,8 @@ sequenceDiagram
         end
     end
     
-    Step 2: LLM Rewrite + Vector Search
+    Step 2: LLM Rewrite + Knowledge Search
+    Note over API,Classifier: OUT_OF_SCOPE continues to search before final rejection
     API->>Classifier: Rewrite query for search
     Classifier-->>API: Rewritten search query
     
@@ -62,18 +61,18 @@ sequenceDiagram
     
     API->>API: Merge & dedup (3 vector + 2 BM25)
     
-    alt Score > 0.5 (Good match)
+    alt Relevant chunks found
         API->>GPT: RAG prompt with context
         GPT-->>API: Answer with citations
-    else Score ≤ 0.5 (No match)
-        Step 3: LLM Evaluate Reason
-        API->>Classifier: Classify query type
+        API->>Classifier: Evaluate generated answer as SUFFICIENT, OUT_OF_SCOPE, or NO_CONTEXT
+    else No chunks found
+        Step 3: Use classifier fallback
         alt OUT_OF_SCOPE
             API-->>Widget: "I can only help with {domain}..."
             API->>API: Log gap (type: out_of_scope)
-        else KNOWLEDGE_GAP
+        else PROCEED
             API-->>Widget: "I don't have that info..."
-            API->>API: Log gap (type: knowledge_gap)
+            API->>API: Log gap (type: no_context)
         end
     end
     
@@ -125,9 +124,9 @@ sequenceDiagram
 ### 4. Hybrid Search Merge Strategy
 ```mermaid
 flowchart TD
-    Q[User Query] --> RG{Regex<br/>Greeting?}
-    RG -->|Yes| GR["Greeting Response<br/>(no LLM call)"]
-    RG -->|No| RW[gpt-4o-mini<br/>Rewrite Query]
+    Q[User Query] --> CL[gpt-4o-mini<br/>Classify Query]
+    CL -->|GREETING| GR["Greeting Response"]
+    CL -->|PROCEED or OUT_OF_SCOPE| RW[gpt-4o-mini<br/>Rewrite Query]
     
     RW --> VE["$vectorSearch<br/>9 candidates fetched"]
     RW --> BE["$search / BM25<br/>6 candidates fetched"]
@@ -138,13 +137,11 @@ flowchart TD
     VG --> Merge{Merge & Dedup}
     BG --> Merge
     
-    Merge -->|3 vector + 2 BM25| SC{Score > 0.5?}
-    
-    SC -->|Yes| PA[Parent Context Assembly]
-    SC -->|No| CL[gpt-4o-mini<br/>Classify Query]
-    
-    CL --> OOS[OUT_OF_SCOPE<br/>Log gap + deflect]
-    CL --> KG[KNOWLEDGE_GAP<br/>Log gap + deflection]
+    Merge -->|Chunks found| PA[Parent Context Assembly]
+    Merge -->|No chunks| FB{Use pre-classifier result}
+
+    FB -->|OUT_OF_SCOPE| OOS[OUT_OF_SCOPE<br/>Log gap + deflect]
+    FB -->|PROCEED| KG[NO_CONTEXT<br/>Log gap + deflection]
     
     PA -->|≤1600 tokens| FS[Full parent section]
     PA -->|>1600 tokens| CW[Child + 1 neighbor each side]
@@ -649,11 +646,10 @@ sequenceDiagram
     Visitor->>Widget: Types "what are school timings"
     Widget->>API: POST /chat { query }
     
-    API->>API: Vector search returns no good match (score ≤ 0.5)
-    
-    API->>Classifier: Classify query type
+    API->>Classifier: Classify query as GREETING, OUT_OF_SCOPE, or PROCEED
     Note over Classifier: Uses business description<br/>for context
-    Classifier-->>API: KNOWLEDGE_GAP
+    Classifier-->>API: PROCEED
+    API->>API: Rewrite + search returns no relevant chunks
     
     API->>Embedder: Embed the query
     API->>DB: Vector search similar gaps (cosine > 0.85)
@@ -719,7 +715,7 @@ All endpoints require JWT authentication (`Authorization: Bearer <token>`).
 ### Technical Details
 - Similarity threshold: 0.85 (for gap deduplication via vector search)
 - FAQ suggestion threshold: 0.8 (returns top 3 matches via vector search)
-- Direct answer threshold: 0.5 (vector search score to return RAG answer)
+- Direct answer threshold: 0.0 (returned chunks enter the RAG answer path; no returned chunks use the no-match fallback)
 - Embedding model: text-embedding-3-small (1536 dimensions)
 - Vector search indexes: `knowledge_gaps_vector_index` (knowledge_gaps), `faqs_vector_index` (faqs)
 - Normalization: lowercase, remove punctuation, collapse whitespace (generic, no hardcoded words)
@@ -799,11 +795,12 @@ When a lead form is submitted, if any field has a `field_role` of `name`, `email
 
 ### Guardrails
 
-The chatbot avoids answering irrelevant questions through vector search scoring:
+The chatbot avoids answering irrelevant questions without letting the pre-classifier hide valid FAQs or indexed content:
 
-1. **Vector search threshold**: If the top result score ≤ 0.5, the query is treated as "no match" and sent to the classifier.
-2. **LLM classifier**: Classifies the query as `OUT_OF_SCOPE` (unrelated to business) or `KNOWLEDGE_GAP` (related but missing answer).
-3. **Hardened system prompt**: The RAG prompt instructs GPT — "If the context does not contain information relevant to the user's question, say you don't have that information."
+1. **Pre-classifier**: Classifies the query as `GREETING`, `OUT_OF_SCOPE`, or `PROCEED`. Greetings return immediately; `OUT_OF_SCOPE` continues to retrieval before final rejection.
+2. **Knowledge search before final out-of-scope**: Non-greeting queries are rewritten and searched across indexed FAQs, documents, text docs, and crawled pages even if the classifier guessed `OUT_OF_SCOPE`.
+3. **Hardened system prompt**: The RAG prompt instructs GPT to answer only from retrieved context and say it does not have the information when context is insufficient.
+4. **Answered-query evaluator**: Generated answers are evaluated as `SUFFICIENT`, `OUT_OF_SCOPE`, or `NO_CONTEXT` for gap logging.
 
 ## Visitor Profiles
 
@@ -880,12 +877,10 @@ To ensure high-performance, cost-effective conversational capability, the system
 ### Greeting Detection (Regex Fast-Path)
 Greetings like "hi", "hello", "hey" are detected via regex (~10ms) without any LLM call. This is faster and cheaper than the previous LLM-based classification.
 
-### Vector Search Before Classification
-Instead of classifying queries first (which skipped knowledge base lookups for out-of-scope queries), the system now:
-1. Searches the knowledge base first
-2. Only classifies if no good match found (score ≤ 0.5)
+### Search Before Final Out-of-Scope
+The system still classifies early for greetings and scope hints, but only greetings stop the pipeline immediately. If the classifier returns `OUT_OF_SCOPE`, the backend still rewrites the query and searches the knowledge base before rejecting.
 
-This ensures answers from PDFs, FAQs, and crawled content are always found, even for queries that might be misclassified.
+This prevents short or ambiguous FAQ queries, such as "cash prize of 2025" or "class timings", from being incorrectly blocked before retrieval.
 
 ### Hybrid Search (Vector + BM25)
 - **3 guaranteed slots** from vector search (semantic matching via `$vectorSearch`)
@@ -897,11 +892,11 @@ This ensures answers from PDFs, FAQs, and crawled content are always found, even
 ### Heading Prefix in Embeddings
 Section titles (e.g., *"Bus Tracking"*) are prepended to child chunk text before embedding (stored as `search_text`). The body text alone (*"Track school buses in real-time"*) misses the most descriptive keywords. The prefix is only used for embedding — the clean `text` field is served to GPT as context.
 
-### Direct Answer Threshold (0.5)
-Vector search scores above 0.5 return a RAG answer directly. Below 0.5, the query is sent to the LLM classifier to determine if it's out-of-scope or a knowledge gap.
+### Direct Answer Threshold
+`DIRECT_ANSWER_THRESHOLD` is currently `0.0`, so any returned chunks are allowed into the RAG answer path. If no chunks are returned, the backend uses the pre-classification result to choose an out-of-scope or no-context response.
 
 ### Empty Context Guard
-If search returns zero results for a non-greeting query, the system classifies the query and returns an appropriate response — without calling GPT-4o for a RAG answer — preventing hallucination.
+If search returns zero results for a non-greeting query, the system returns an appropriate no-match response without calling the answer model for a RAG answer. A pre-classified `OUT_OF_SCOPE` query gets an out-of-scope response; otherwise it is treated as missing knowledge/no context.
 
 ### Language Mirroring
 The chatbot detects the language of the user's message and replies in the same language. If a user writes in Hindi or Hinglish (e.g., "mujhe admission chahiye"), the response is in Hinglish. If the user writes in English, the response is in English. This is enforced via a constant (`_LANGUAGE_RULE`) injected into all response prompts, overriding the knowledge base language.
