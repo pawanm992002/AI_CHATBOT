@@ -90,6 +90,7 @@ open backend/templates/test_page.html
 - Rate limiting: 3 layers — per-IP, per-tenant, per-session (Redis sorted sets, sliding window)
 - Schema validation enforced on startup via JSON Schema in `core/schema_validator.py`
 - Profile classification happens inline via the query rewrite LLM call (zero added latency) — no background sweep, persistent at the visitor level across all sessions
+- Chat query classification is retrieval-safe: `GREETING` can return immediately, but `OUT_OF_SCOPE` must not skip rewrite/search. Non-greeting queries still search indexed FAQs/docs/pages first; only if no chunks are found should the pre-classification result drive the out-of-scope vs no-context response.
 - All visitor/conversation queries must include `tenant_id` alongside `visitor_id` or `session_id` for multi-tenant isolation
 - Language mirroring: the chatbot detects the user's language and replies in the same language (Hinglish, Hindi, English) via `_LANGUAGE_RULE` constant in chat prompts
 - First-token buffering: the streaming pipeline buffers the first token to strip leading hallucinated artifacts (stray punctuation, markdown fragments) before streaming to the widget
@@ -121,7 +122,7 @@ open backend/templates/test_page.html
 |---|---|
 | `backend/core/config.py` | Pydantic Settings, env variable loading |
 | `backend/core/auth.py` | JWT creation/verification, API key auth, rate limiter |
-| `backend/services/chat_service.py` | Core chat pipeline (classify, search, answer, tool calling for lead forms, log gaps, personalized greeting, school mode `/school`/`/exit`/`/logout`) — all conversation queries scoped by `(session_id, tenant_id)` |
+| `backend/services/chat_service.py` | Core chat pipeline (classify, rewrite/search, answer, tool calling for lead forms, log gaps, personalized greeting, school mode `/school`/`/exit`/`/logout`) — `OUT_OF_SCOPE` classification does not bypass retrieval, and all conversation queries are scoped by `(session_id, tenant_id)` |
 | `backend/services/chat_prompts.py` | All chat prompt templates (`ANSWER_WITH_CONTEXT_PROMPT`, `_LANGUAGE_RULE`, `NO_MATCH_EVALUATOR_PROMPT`, `NO_MATCH_EVALUATOR_WITH_ANSWER_PROMPT`, `SCHOOL_MODE_ACTIVATED_PROMPT`) |
 | `backend/services/vector_search.py` | Hybrid vector + BM25 search (guaranteed-slot dedup, parent-level context assembly) |
 | `backend/services/ingestion.py` | Document chunking/embedding pipeline |
