@@ -59,6 +59,7 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const headerDragYRef = useRef(0);
+  const isDraggingRef = useRef(false);
 
   useStyleInjection();
   const hostTheme = useHostTheme();
@@ -139,6 +140,53 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
     return () => clearTimeout(timer);
   }, [messages, isLoading]);
 
+  // Lock body scroll when widget opens on mobile (position:fixed works on iOS Safari where overflow:hidden fails)
+  useEffect(() => {
+    if (isMobile && isOpen) {
+      const scrollY = window.scrollY;
+      const prev = {
+        position: document.body.style.position,
+        top: document.body.style.top,
+        width: document.body.style.width,
+        overflow: document.body.style.overflow,
+        touchAction: document.body.style.touchAction,
+        overscrollBehavior: document.body.style.overscrollBehavior,
+      };
+      document.body.style.position = 'fixed';
+      document.body.style.top = `-${scrollY}px`;
+      document.body.style.width = '100%';
+      document.body.style.overflow = 'hidden';
+      document.body.style.touchAction = 'none';
+      document.body.style.overscrollBehavior = 'none';
+      return () => {
+        document.body.style.position = prev.position;
+        document.body.style.top = prev.top;
+        document.body.style.width = prev.width;
+        document.body.style.overflow = prev.overflow;
+        document.body.style.touchAction = prev.touchAction;
+        document.body.style.overscrollBehavior = prev.overscrollBehavior;
+        window.scrollTo(0, scrollY);
+      };
+    }
+  }, [isMobile, isOpen]);
+
+  // Intercept native touchstart/touchmove to prevent the browser from stealing the gesture
+  // This is necessary because preventDefault() on pointer events has no effect on scrolling per W3C spec
+  useEffect(() => {
+    const preventTouch = (e: TouchEvent) => {
+      if (isDraggingRef.current) {
+        e.preventDefault();
+      }
+    };
+    const opts: AddEventListenerOptions = { passive: false };
+    document.addEventListener('touchstart', preventTouch, opts);
+    document.addEventListener('touchmove', preventTouch, opts);
+    return () => {
+      document.removeEventListener('touchstart', preventTouch);
+      document.removeEventListener('touchmove', preventTouch);
+    };
+  }, []);
+
   // Cleanup WebSocket on unmount
   useEffect(() => {
     return () => {
@@ -175,7 +223,7 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
     const target = event.target as HTMLElement | null;
     if (target?.closest('button, a, input, textarea, select')) return;
 
-    event.preventDefault();
+    isDraggingRef.current = true;
     const el = event.currentTarget;
     el.setPointerCapture(event.pointerId);
 
@@ -190,6 +238,7 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
 
     const handlePointerEnd = () => {
       cleanup();
+      isDraggingRef.current = false;
       if (headerDragYRef.current > 72) {
         closeWidget();
         return;
@@ -518,6 +567,7 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
                 background: 'rgba(0,0,0,0.5)',
                 zIndex: 2147483646,
                 animation: 'cwFadeIn 0.2s ease-out',
+                touchAction: 'none',
               }}
             />
           )}
@@ -545,6 +595,7 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
               fontFamily: font,
               transform: headerDragY ? `translateY(${headerDragY}px)` : undefined,
               transition: headerDragY ? 'none' : 'transform 0.18s ease-out',
+              overscrollBehavior: 'contain',
             }}
           >
 
