@@ -175,6 +175,10 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
     const target = event.target as HTMLElement | null;
     if (target?.closest('button, a, input, textarea, select')) return;
 
+    event.preventDefault();
+    const el = event.currentTarget;
+    el.setPointerCapture(event.pointerId);
+
     const startY = event.clientY;
     headerDragYRef.current = 0;
 
@@ -184,21 +188,25 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
       setHeaderDragY(nextY);
     };
 
-    const handlePointerUp = () => {
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', handlePointerUp);
-
+    const handlePointerEnd = () => {
+      cleanup();
       if (headerDragYRef.current > 72) {
         closeWidget();
         return;
       }
-
       headerDragYRef.current = 0;
       setHeaderDragY(0);
     };
 
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', handlePointerUp);
+    const cleanup = () => {
+      el.removeEventListener('pointermove', handlePointerMove);
+      el.removeEventListener('pointerup', handlePointerEnd);
+      el.removeEventListener('pointercancel', handlePointerEnd);
+    };
+
+    el.addEventListener('pointermove', handlePointerMove);
+    el.addEventListener('pointerup', handlePointerEnd);
+    el.addEventListener('pointercancel', handlePointerEnd);
   }, [closeWidget]);
 
   const handleOpenHistory = useCallback(async () => {
