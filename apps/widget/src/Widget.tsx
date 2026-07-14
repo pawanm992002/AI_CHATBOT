@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useCallback, useMemo, CSSProperties } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import { submitEnquiry, getWidgetConfig, submitFeedback, getVisitorProfile, getConversations, getConversationMessages, apiClient, LeadFormConfig, ConversationSummary } from './api';
 import { WidgetProps, Message, useIsMobile, useStyleInjection } from '@chatbot/shared';
 import { getPalette } from './utils/theme';
@@ -54,8 +55,10 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
   const [view, setView] = useState<'chat' | 'history'>('chat');
   const [sessions, setSessions] = useState<ConversationSummary[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(false);
+  const [headerDragY, setHeaderDragY] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const headerDragYRef = useRef(0);
 
   useStyleInjection();
   const hostTheme = useHostTheme();
@@ -161,6 +164,42 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
     setView('chat');
     sessionStorage.removeItem(`${HISTORY_STORAGE_KEY_PREFIX}${apiKey}`);
   }, [apiKey]);
+
+  const closeWidget = useCallback(() => {
+    headerDragYRef.current = 0;
+    setHeaderDragY(0);
+    setIsOpen(false);
+  }, []);
+
+  const handleHeaderPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('button, a, input, textarea, select')) return;
+
+    const startY = event.clientY;
+    headerDragYRef.current = 0;
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      const nextY = Math.max(0, Math.min(moveEvent.clientY - startY, 180));
+      headerDragYRef.current = nextY;
+      setHeaderDragY(nextY);
+    };
+
+    const handlePointerUp = () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+
+      if (headerDragYRef.current > 72) {
+        closeWidget();
+        return;
+      }
+
+      headerDragYRef.current = 0;
+      setHeaderDragY(0);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+  }, [closeWidget]);
 
   const handleOpenHistory = useCallback(async () => {
     setView('history');
@@ -461,7 +500,7 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
           {/* Mobile backdrop overlay */}
           {isMobile && (
             <div
-              onClick={() => setIsOpen(false)}
+              onClick={closeWidget}
               style={{
                 position: 'fixed',
                 top: 0,
@@ -496,6 +535,8 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
                 ? 'cwSlideUpMobile 0.3s cubic-bezier(0.16,1,0.3,1)'
                 : 'cwFadeIn 0.3s cubic-bezier(0.16,1,0.3,1)',
               fontFamily: font,
+              transform: headerDragY ? `translateY(${headerDragY}px)` : undefined,
+              transition: headerDragY ? 'none' : 'transform 0.18s ease-out',
             }}
           >
 
@@ -517,7 +558,14 @@ export const Widget = ({ apiKey, apiBaseUrl }: WidgetProps) => {
             )}
 
             {/* Header */}
-            <Header palette={palette} onClose={() => setIsOpen(false)} onNewSession={handleNewSession} onHistory={handleOpenHistory} profileColor={profileColor} />
+            <Header
+              palette={palette}
+              onClose={closeWidget}
+              onNewSession={handleNewSession}
+              onHistory={handleOpenHistory}
+              onPointerDown={handleHeaderPointerDown}
+              profileColor={profileColor}
+            />
 
             {/* Messages area */}
             {isDisabled ? (

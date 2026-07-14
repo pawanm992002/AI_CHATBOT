@@ -1,3 +1,4 @@
+import type { PointerEvent as ReactPointerEvent } from 'react';
 import { Palette } from '../utils/theme';
 
 interface HeaderProps {
@@ -5,16 +6,21 @@ interface HeaderProps {
   onClose: () => void;
   onNewSession: () => void;
   onHistory: () => void;
+  onPointerDown?: (event: ReactPointerEvent<HTMLDivElement>) => void;
   profileColor?: string | null;
 }
 
-export function Header({ palette, onClose, onNewSession, onHistory, profileColor }: HeaderProps) {
+export function Header({ palette, onClose, onNewSession, onHistory, onPointerDown, profileColor }: HeaderProps) {
   return (
     <div 
       className="px-5 py-4 flex justify-between items-center shrink-0"
+      onPointerDown={onPointerDown}
       style={{
         background: palette.headerBg,
         color: palette.headerText,
+        cursor: onPointerDown ? 'grab' : undefined,
+        touchAction: onPointerDown ? 'none' : undefined,
+        userSelect: onPointerDown ? 'none' : undefined,
       }}
     >
       <div className="flex items-center gap-2.5">
