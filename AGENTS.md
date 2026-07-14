@@ -69,6 +69,9 @@ pyright
 
 # Python dependency sync
 uv sync
+
+# Backend tests
+uv run python -m unittest discover -s backend/tests -p "test_*.py" -v
 ```
 
 ### Testing
@@ -94,6 +97,9 @@ open backend/templates/test_page.html
 - Archival Triggers:
   1) **Over-limit active turn compression**: moves oldest turns to DO Spaces if a single session exceeds 60 messages.
   2) **Session completion trigger**: fully archives previous sessions to DO Spaces in the background when a visitor initializes a new chat session.
+- **De-archive on resume**: `get_full_conversation()` reconstructs full history by merging DO Spaces archive parts (JSONL, paginated via `list_objects_v2`) with in-MongoDB messages under `full_messages` key
+- **School ERP agent** uses LangGraph `StateGraph` with 3 nodes: `agent` (LLM + tool binding), `read_tools` (executes read-only tools), `approval` (human-in-the-loop via `interrupt()` for write operations). Write tools guarded by `SCHOOL_WRITE_ACTIONS_ENABLED` env var (default `False`). Entity names resolved to IDs before lookups (resolve-then-query pattern). All tool invocations logged to both `school_data_query_log` and `school_audit_log`.
+- **NO_MATCH_EVALUATOR_WITH_ANSWER_PROMPT**: new evaluator classifies answered queries as `SUFFICIENT`, `OUT_OF_SCOPE`, or `NO_CONTEXT` — distinct from the existing `NO_MATCH_EVALUATOR_PROMPT` which only handles unanswered queries
 
 ### Frontend (TypeScript/React)
 - Dashboard: SPA with react-router-dom, private/admin routes, TailwindCSS dark theme (slate-950)
@@ -116,17 +122,21 @@ open backend/templates/test_page.html
 | `backend/core/config.py` | Pydantic Settings, env variable loading |
 | `backend/core/auth.py` | JWT creation/verification, API key auth, rate limiter |
 | `backend/services/chat_service.py` | Core chat pipeline (classify, search, answer, tool calling for lead forms, log gaps, personalized greeting, school mode `/school`/`/exit`/`/logout`) — all conversation queries scoped by `(session_id, tenant_id)` |
-| `backend/services/vector_search.py` | Hybrid vector + BM25 search |
+| `backend/services/chat_prompts.py` | All chat prompt templates (`ANSWER_WITH_CONTEXT_PROMPT`, `_LANGUAGE_RULE`, `NO_MATCH_EVALUATOR_PROMPT`, `NO_MATCH_EVALUATOR_WITH_ANSWER_PROMPT`, `SCHOOL_MODE_ACTIVATED_PROMPT`) |
+| `backend/services/vector_search.py` | Hybrid vector + BM25 search (guaranteed-slot dedup, parent-level context assembly) |
 | `backend/services/ingestion.py` | Document chunking/embedding pipeline |
 | `backend/services/embedder.py` | OpenAI embeddings via LangChain `OpenAIEmbeddings` |
 | `backend/services/llm/factory.py` | Provider-agnostic LLM factory (OpenAI, Groq, OpenRouter) — `get_llm()`, `get_llm_raw()`, `_to_lc_messages()`, `extract_usage()` |
 | `backend/services/llm/pricing.py` | Centralized LLM pricing table and `calculate_cost()` for cost estimation |
 | `backend/services/admin_analytics_service.py` | MongoDB aggregation pipelines for platform-wide analytics (overview, timeseries, per-tenant, model leaderboard) |
-| `backend/services/archival_service.py` | Hot/cold conversation storage — archives old turns (>40 msgs) to DO Spaces, `_pending` set prevents concurrent archival per conversation |
+| `backend/services/archival_service.py` | Hot/cold conversation storage — archives to DO Spaces, de-archive via `get_full_conversation()` (JSONL parts merged with live messages), `_pending` set prevents concurrent archival |
 | `backend/services/visitor_profile_service.py` | Real-time profile classification (inline via rewrite LLM call), profile context injection into system prompt |
 | `backend/services/storage.py` | DigitalOcean Spaces upload/delete utility (S3-compatible) for PDF storage and conversation archival |
 | `backend/services/pdf_parser.py` | PDF text extraction via PyMuPDF (fitz), page-by-page markdown formatting |
 | `backend/config/models.json` | LLM model catalog — 20 models across 3 providers (OpenAI, Groq, OpenRouter) |
+| `backend/services/school_agent/graph.py` | LangGraph `StateGraph` for school ERP agent — 3 nodes (agent, read_tools, approval), human-in-the-loop via `interrupt()` for writes |
+| `backend/services/school_agent/tools.py` | 14 LangChain tools for school ERP — read tools (query 10 collections), resolver tools (fuzzy name→ID), write tools (guarded by env var) |
+| `backend/services/school_agent/README.md` | Architecture docs for LangGraph school agent (Mermaid diagram, tool categories, interrupt flow) |
 | `backend/repositories/knowledge_gap_repository.py` | CRUD for knowledge gaps with vector similarity deduplication |
 | `backend/repositories/feedback_repository.py` | CRUD for message feedback (like/dislike) |
 | `backend/repositories/source_repository.py` | CRUD for knowledge sources |
@@ -135,6 +145,8 @@ open backend/templates/test_page.html
 | `backend/core/rate_limiter.py` | Redis-based sliding window rate limiter (per-IP, per-tenant, per-session) |
 | `apps/widget/src/components/ErrorBoundary.tsx` | React error boundary preventing widget crashes from killing WebSocket |
 | `apps/widget/src/components/EnquiryForm.tsx` | Dynamic lead form component rendered via LLM tool calling |
+| `apps/widget/src/components/Header.tsx` | Widget header — AI Assistant title, profile color dot, chat history button, new chat and close buttons |
+| `apps/widget/src/components/SessionHistory.tsx` | Full-height searchable session history panel with loading/empty states |
 | `backend/core/schema_validator.py` | MongoDB JSON schema validators (29 collections) |
 | `apps/widget/src/Widget.tsx` | Main widget component (WebSocket streaming) |
 | `apps/widget/src/index.tsx` | Widget bootstrapper (reads `data-api-key` from script tag) |
@@ -150,7 +162,7 @@ open backend/templates/test_page.html
 | `backend/controllers/conversations.py` | Dashboard JWT-authenticated conversation detail + full history (merges DO Spaces archive) endpoints |
 | `packages/shared/src/types.ts` | Shared TypeScript interfaces (includes VisitorProfile, Visitor, LeadFormField with field_role) |
 | `scripts/seed_school_data.py` | Excel → MongoDB seeder for school ERP data (CLI: `--source-file`, `--dev`) |
-| `backend/services/school_data_service.py` | NL→MongoDB query engine for school data, audit logging, session management, fee summary |
+| `backend/services/school_data_service.py` | NL→MongoDB query engine for school data — entry point delegates to LangGraph agent, audit logging, session management, fee summary |
 | `backend/services/school_data_filter.py` | Query safety allowlists + `build_safe_filter()` for school collections |
 | `backend/models/school_data.py` | Pydantic v2 schemas for all 10 school entities + audit log |
 | `backend/repositories/school_repository.py` | CRUD for schools, classes, sections |
@@ -159,6 +171,7 @@ open backend/templates/test_page.html
 | `backend/repositories/school_transport_repository.py` | CRUD for routes, stops, transport_assign |
 | `backend/repositories/school_hostel_repository.py` | CRUD for hostel_assign |
 | `backend/tests/test_school_query_safety.py` | 16 unit tests for query safety |
+| `backend/tests/test_school_agent.py` | 5 integration tests for LangGraph agent (resolve tools, multi-hop, write approval + resume, audit logging) |
 
 ## Database Collections
 
@@ -179,3 +192,4 @@ Copy `.env.production.example` to `.env` and fill in:
 - `DO_SPACES_SECRET_KEY` — DigitalOcean Spaces secret key
 - `DO_SPACES_ENDPOINT` — DigitalOcean Spaces endpoint URL (e.g. https://nyc3.digitaloceanspaces.com)
 - `DO_SPACES_BUCKET` — DigitalOcean Spaces bucket name
+- `SCHOOL_WRITE_ACTIONS_ENABLED` — Set to `True` to enable school ERP write tools (default `False`)

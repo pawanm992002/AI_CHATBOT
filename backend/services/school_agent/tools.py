@@ -4,6 +4,7 @@ from typing import Any, Optional, List
 from langchain_core.tools import tool
 from langchain_core.runnables import RunnableConfig
 from core.auth import db
+from core.config import settings
 from services.school_data_filter import build_safe_filter
 
 def serialize_value(v: Any) -> Any:
@@ -343,7 +344,7 @@ async def update_transport_status(
     await log_tool_invocation(config, "update_transport_status", {"transport_id": transport_id, "status": status})
     
     import os
-    if os.environ.get("SCHOOL_WRITE_ACTIONS_ENABLED", "False").lower() != "true":
+    if settings.SCHOOL_WRITE_ACTIONS_ENABLED is not True:
         return "Write actions are disabled by default. Set SCHOOL_WRITE_ACTIONS_ENABLED=True to enable."
         
     result = await db.school_transport_assign.update_one(
@@ -365,7 +366,7 @@ async def update_hostel_status(
     await log_tool_invocation(config, "update_hostel_status", {"hostel_id": hostel_id, "status": status})
     
     import os
-    if os.environ.get("SCHOOL_WRITE_ACTIONS_ENABLED", "False").lower() != "true":
+    if settings.SCHOOL_WRITE_ACTIONS_ENABLED is not True:
         return "Write actions are disabled by default. Set SCHOOL_WRITE_ACTIONS_ENABLED=True to enable."
         
     result = await db.school_hostel_assign.update_one(
@@ -387,7 +388,7 @@ async def update_fee_status(
     await log_tool_invocation(config, "update_fee_status", {"applied_fee_id": applied_fee_id, "status": status})
     
     import os
-    if os.environ.get("SCHOOL_WRITE_ACTIONS_ENABLED", "False").lower() != "true":
+    if settings.SCHOOL_WRITE_ACTIONS_ENABLED is not True:
         return "Write actions are disabled by default. Set SCHOOL_WRITE_ACTIONS_ENABLED=True to enable."
         
     result = await db.school_applied_fees.update_one(
