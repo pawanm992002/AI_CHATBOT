@@ -15,9 +15,12 @@ export function Header({ palette, onClose, onNewSession, onHistory, onPointerDow
   const headerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (headerRef.current && onPointerDown) {
-      headerRef.current.style.setProperty('touch-action', 'none', 'important');
-    }
+    const el = headerRef.current;
+    if (!el || !onPointerDown) return;
+    el.style.setProperty('touch-action', 'none', 'important');
+    const preventTouch = (e: TouchEvent) => e.preventDefault();
+    el.addEventListener('touchstart', preventTouch, { passive: false });
+    return () => el.removeEventListener('touchstart', preventTouch);
   }, [onPointerDown]);
 
   return (
