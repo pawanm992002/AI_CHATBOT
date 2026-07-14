@@ -18,7 +18,10 @@ export function Header({ palette, onClose, onNewSession, onHistory, onPointerDow
     const el = headerRef.current;
     if (!el || !onPointerDown) return;
     el.style.setProperty('touch-action', 'none', 'important');
-    const preventTouch = (e: TouchEvent) => e.preventDefault();
+    const preventTouch = (e: TouchEvent) => {
+      if ((e.target as HTMLElement | null)?.closest('button, a, input, textarea, select')) return;
+      e.preventDefault();
+    };
     el.addEventListener('touchstart', preventTouch, { passive: false });
     return () => el.removeEventListener('touchstart', preventTouch);
   }, [onPointerDown]);
