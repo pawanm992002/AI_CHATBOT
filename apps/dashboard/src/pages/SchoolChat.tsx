@@ -1,5 +1,6 @@
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from 'react';
 import { Bot, CirclePlus, Loader2, Send, UserRound } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import { privateAxios } from '../utils/axios';
 
 interface ChatMessage {
@@ -15,6 +16,21 @@ const questions = [
   'What is the transport status for Ansh Sharma?',
   'How many students are in class 5?',
 ];
+
+const AssistantMessage = ({ content }: { content: string }) => (
+  <ReactMarkdown
+    components={{
+      p: ({ children }) => <p className="my-1 first:mt-0 last:mb-0">{children}</p>,
+      strong: ({ children }) => <strong className="font-semibold text-white">{children}</strong>,
+      ul: ({ children }) => <ul className="my-2 list-disc space-y-1 pl-5">{children}</ul>,
+      ol: ({ children }) => <ol className="my-2 list-decimal space-y-1 pl-5">{children}</ol>,
+      li: ({ children }) => <li>{children}</li>,
+      code: ({ children }) => <code className="bg-slate-800 px-1 py-0.5 font-mono text-xs text-violet-200">{children}</code>,
+    }}
+  >
+    {content}
+  </ReactMarkdown>
+);
 
 const SchoolChat = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -100,12 +116,12 @@ const SchoolChat = () => {
       </header>
 
       <div className="flex-1 overflow-y-auto p-4 sm:p-6">
-        {loadingHistory ? <div className="flex h-full items-center justify-center gap-2 text-sm text-slate-400"><Loader2 size={18} className="animate-spin" /> Loading conversation</div> : messages.length ? <div className="mx-auto max-w-4xl space-y-5">{messages.map((message, index) => <div key={`${message.role}-${index}`} className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}><div className={`flex h-8 w-8 shrink-0 items-center justify-center ${message.role === 'user' ? 'order-2 bg-slate-700 text-slate-200' : 'bg-violet-600 text-white'}`}>{message.role === 'user' ? <UserRound size={16} /> : <Bot size={16} />}</div><div className={`max-w-[85%] whitespace-pre-wrap border px-4 py-3 text-sm leading-6 ${message.role === 'user' ? 'order-1 border-violet-500/40 bg-violet-950/40 text-violet-100' : 'border-slate-800 bg-slate-950 text-slate-200'}`}>{message.content}</div></div>)}{loading && <div className="flex gap-3"><div className="flex h-8 w-8 items-center justify-center bg-violet-600 text-white"><Bot size={16} /></div><div className="flex items-center border border-slate-800 bg-slate-950 px-4 text-sm text-slate-400"><Loader2 size={16} className="mr-2 animate-spin" /> Checking school data</div></div>}<div ref={bottomRef} /></div> : <div className="mx-auto flex h-full max-w-2xl flex-col items-center justify-center text-center"><div className="flex h-12 w-12 items-center justify-center bg-violet-600 text-white"><Bot size={24} /></div><h3 className="mt-4 text-lg font-bold text-white">School data assistant</h3><div className="mt-6 grid w-full gap-2 sm:grid-cols-2">{questions.map(item => <button key={item} onClick={() => sendMessage(undefined, item)} className="border border-slate-700 bg-slate-950 px-4 py-3 text-left text-sm text-slate-300 transition-colors hover:border-violet-500 hover:text-white">{item}</button>)}</div></div>}
+        {loadingHistory ? <div className="flex h-full items-center justify-center gap-2 text-sm text-slate-400"><Loader2 size={18} className="animate-spin" /> Loading conversation</div> : messages.length ? <div className="mx-auto max-w-4xl space-y-5">{messages.map((message, index) => <div key={`${message.role}-${index}`} className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}><div className={`flex h-8 w-8 shrink-0 items-center justify-center ${message.role === 'user' ? 'order-2 bg-slate-700 text-slate-200' : 'bg-violet-600 text-white'}`}>{message.role === 'user' ? <UserRound size={16} /> : <Bot size={16} />}</div><div className={`max-w-[85%] border px-4 py-3 text-sm leading-6 ${message.role === 'user' ? 'order-1 whitespace-pre-wrap border-violet-500/40 bg-violet-950/40 text-violet-100' : 'border-slate-800 bg-slate-950 text-slate-200'}`}>{message.role === 'user' ? message.content : <AssistantMessage content={message.content} />}</div></div>)}{loading && <div className="flex gap-3"><div className="flex h-8 w-8 items-center justify-center bg-violet-600 text-white"><Bot size={16} /></div><div className="flex items-center border border-slate-800 bg-slate-950 px-4 text-sm text-slate-400"><Loader2 size={16} className="mr-2 animate-spin" /> Checking school data</div></div>}<div ref={bottomRef} /></div> : <div className="mx-auto flex h-full max-w-2xl flex-col items-center justify-center text-center"><div className="flex h-12 w-12 items-center justify-center bg-violet-600 text-white"><Bot size={24} /></div><h3 className="mt-4 text-lg font-bold text-white">School data assistant</h3><div className="mt-6 grid w-full gap-2 sm:grid-cols-2">{questions.map(item => <button key={item} onClick={() => sendMessage(undefined, item)} className="border border-slate-700 bg-slate-950 px-4 py-3 text-left text-sm text-slate-300 transition-colors hover:border-violet-500 hover:text-white">{item}</button>)}</div></div>}
       </div>
 
       <div className="border-t border-slate-800 p-4">
         {error && <p className="mb-3 border-l-2 border-rose-400 bg-rose-950/20 px-3 py-2 text-sm text-rose-200">{error}</p>}
-        <form onSubmit={sendMessage} className="mx-auto flex max-w-4xl items-end gap-2"><textarea value={question} onChange={event => setQuestion(event.target.value)} onKeyDown={handleKeyDown} disabled={loading || loadingHistory} rows={2} maxLength={500} placeholder="Ask about students, fees, payments, transport, or hostel" className="min-h-11 flex-1 resize-none border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-violet-500 disabled:opacity-60" /><button type="submit" disabled={!question.trim() || loading || loadingHistory} title="Send question" className="flex h-11 w-11 shrink-0 items-center justify-center bg-violet-600 text-white transition-colors hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50"><Send size={18} /></button></form>
+        <form onSubmit={sendMessage} className="mx-auto flex max-w-4xl items-center gap-3"><textarea value={question} onChange={event => setQuestion(event.target.value)} onKeyDown={handleKeyDown} disabled={loading || loadingHistory} rows={2} maxLength={500} placeholder="Ask about students, fees, payments, transport, or hostel" className="min-h-12 flex-1 resize-none border border-slate-700 bg-slate-950 px-3 py-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-violet-500 disabled:opacity-60" /><button type="submit" disabled={!question.trim() || loading || loadingHistory} title="Send question" className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-violet-600 text-white shadow-sm shadow-violet-950 transition-colors hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50"><Send size={19} /></button></form>
       </div>
     </div>
   );

@@ -21,7 +21,7 @@ graph TD
 
 ### 1. `tools.py`
 Defines the atomic operations the agent can perform. 
-- **Read Tools**: Query collections like `school_students`, `school_classes`, `school_sections`, `school_applied_fees`, `school_payments`, `school_routes`, `school_stops`, `school_transport_assign`, and `school_hostel_assign`.
+- **Generic Read Tools**: Safely search any entity registered in `school_data_registry.py`, fetch one entity by ID, follow declared relationships, count records, and run deterministic reports. Adding a new table means registering it, not adding another tool.
 - **Resolver Tools**: Help resolve fuzzy/partial names (e.g., student name, class name) to exact database IDs.
   - `resolve_student_id`
   - `resolve_class_id`
@@ -52,6 +52,6 @@ The entry point to the ERP module remains `SchoolDataService.query()` in `backen
 
 Comprehensive unit tests are located in `backend/tests/test_school_agent.py` covering:
 - Entity resolvers (`resolve_student_id`, `resolve_class_id`).
-- Multi-hop query chains (resolving a name and looking up transit status).
+- Name resolution followed by a related transport lookup.
 - Write interception and resumption via the interrupt mechanism.
 - Security and audit log generation.

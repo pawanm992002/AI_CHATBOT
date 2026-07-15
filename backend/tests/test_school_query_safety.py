@@ -1,131 +1,75 @@
-"""
-Unit tests for SchoolDataService query safety.
-
-Verifies that malicious/broken LLM outputs cannot escape tenant scoping
-or inject dangerous Mongo operators.
-"""
+"""Unit tests for registry-backed School ERP query safety."""
 
 import unittest
-from services.school_data_filter import build_safe_filter, validate_condition, FIELD_ALLOWLIST
+
+from services.school_data_engine import (
+    MAX_REGEX_LENGTH,
+    build_entity_filter,
+    validate_filter_condition,
+)
+from services.school_data_registry import SAFE_OPERATORS, SCHOOL_ENTITY_REGISTRY, get_entity_spec
 
 
-class TestValidateCondition(unittest.TestCase):
-    """Tests that validate_condition rejects dangerous or invalid inputs."""
+class TestRegistryQuerySafety(unittest.TestCase):
+    def setUp(self):
+        self.student = get_entity_spec("student")
 
-    def test_rejects_unknown_collection(self):
-        cond = {"field": "student_name", "op": "$eq", "value": "Ansh"}
-        result = validate_condition("nonexistent_collection", cond)
-        self.assertIsNone(result)
+    def test_rejects_unknown_entity(self):
+        with self.assertRaises(ValueError):
+            get_entity_spec("nonexistent_entity")
 
-    def test_rejects_disallowed_field(self):
-        cond = {"field": "password_hash", "op": "$eq", "value": "hunter2"}
-        result = validate_condition("school_students", cond)
-        self.assertIsNone(result)
+    def test_rejects_sensitive_or_unknown_fields(self):
+        for field in ("password_hash", "api_key", "tenant_id"):
+            with self.assertRaises(ValueError):
+                validate_filter_condition(self.student, {"field": field, "op": "$eq", "value": "x"})
 
-    def test_rejects_disallowed_operator(self):
-        cond = {"field": "student_name", "op": "$where", "value": "1==1"}
-        result = validate_condition("school_students", cond)
-        self.assertIsNone(result)
-
-    def test_rejects_tenant_id_field(self):
-        """LLM must NOT be able to specify tenant_id as a filter field."""
-        for coll, allow in FIELD_ALLOWLIST.items():
-            cond = {"field": "tenant_id", "op": "$eq", "value": "some_other_tenant"}
-            result = validate_condition(coll, cond)
-            self.assertIsNone(result, f"{coll} allowed tenant_id filter!")
-
-    def test_rejects_expr_operator(self):
-        cond = {"field": "student_name", "op": "$expr", "value": "1"}
-        result = validate_condition("school_students", cond)
-        self.assertIsNone(result)
+    def test_rejects_dangerous_operators(self):
+        for operator in ("$where", "$expr", "$function", "$accumulator"):
+            with self.assertRaises(ValueError):
+                validate_filter_condition(self.student, {"field": "student_name", "op": operator, "value": "x"})
 
     def test_rejects_long_regex(self):
-        """Regex longer than 200 chars should be rejected."""
-        cond = {"field": "student_name", "op": "$regex", "value": "a" * 250}
-        result = validate_condition("school_students", cond)
-        self.assertIsNone(result)
+        with self.assertRaises(ValueError):
+            validate_filter_condition(
+                self.student,
+                {"field": "student_name", "op": "$regex", "value": "a" * (MAX_REGEX_LENGTH + 1)},
+            )
 
-    def test_accepts_valid_eq_condition(self):
-        cond = {"field": "class_id", "op": "$eq", "value": 5}
-        result = validate_condition("school_students", cond)
-        self.assertEqual(result, {"class_id": {"$eq": 5}})
+    def test_accepts_valid_filter_conditions(self):
+        self.assertEqual(
+            validate_filter_condition(self.student, {"field": "class_id", "op": "$eq", "value": 5}),
+            {"class_id": {"$eq": 5}},
+        )
+        self.assertEqual(
+            validate_filter_condition(self.student, {"field": "class_id", "op": "$in", "value": [1, 2]}),
+            {"class_id": {"$in": [1, 2]}},
+        )
 
-    def test_accepts_valid_regex_condition(self):
-        cond = {"field": "student_name", "op": "$regex", "value": "Ansh"}
-        result = validate_condition("school_students", cond)
-        assert result is not None
-        self.assertIn("$regex", result["student_name"])
-
-    def test_accepts_valid_in_condition(self):
-        cond = {"field": "class_id", "op": "$in", "value": [1, 2, 3]}
-        result = validate_condition("school_students", cond)
-        self.assertEqual(result, {"class_id": {"$in": [1, 2, 3]}})
-
-    def test_all_collections_have_allowlist(self):
-        """Every collection in FIELD_ALLOWLIST must have allowed_fields and allowed_ops."""
-        for coll, rules in FIELD_ALLOWLIST.items():
-            self.assertIn("allowed_fields", rules, f"{coll} missing allowed_fields")
-            self.assertIn("allowed_ops", rules, f"{coll} missing allowed_ops")
-            self.assertNotIn("tenant_id", rules["allowed_fields"],
-                             f"{coll} must NOT allow filtering on tenant_id")
-
-
-class TestBuildSafeFilter(unittest.TestCase):
-    """Tests that build_safe_filter always injects tenant_id server-side."""
-
-    def test_injects_tenant_id(self):
-        conditions = [{"field": "student_name", "op": "$eq", "value": "Ansh"}]
-        result = build_safe_filter("school_students", conditions, "tenant_abc")
-        self.assertIn("$and", result)
+    def test_build_filter_injects_tenant_id(self):
+        result = build_entity_filter(
+            self.student,
+            [{"field": "student_name", "op": "$regex", "value": "Ansh"}],
+            "tenant_abc",
+        )
         self.assertIn({"tenant_id": "tenant_abc"}, result["$and"])
+        self.assertIn({"student_name": {"$regex": "Ansh", "$options": "i"}}, result["$and"])
 
-    def test_rejects_tenant_id_via_conditions(self):
-        """Even if LLM sends a tenant_id condition, it gets filtered out."""
-        conditions = [
-            {"field": "tenant_id", "op": "$eq", "value": "malicious_tenant"},
-            {"field": "student_name", "op": "$eq", "value": "Ansh"},
-        ]
-        result = build_safe_filter("school_students", conditions, "tenant_abc")
-        self.assertIn("$and", result)
-        # The $and should have exactly 2 items: tenant_id (server-side) + student_name condition
-        # The malicious tenant_id condition from LLM must NOT appear
-        self.assertEqual(len(result["$and"]), 2)
-        self.assertIn({"tenant_id": "tenant_abc"}, result["$and"])
-        self.assertIn({"student_name": {"$eq": "Ansh"}}, result["$and"])
-        # Verify the malicious tenant_id value is NOT present
-        self.assertNotIn({"tenant_id": "malicious_tenant"}, result["$and"])
+    def test_tenant_override_is_rejected(self):
+        with self.assertRaises(ValueError):
+            build_entity_filter(
+                self.student,
+                [{"field": "tenant_id", "op": "$eq", "value": "other_tenant"}],
+                "tenant_abc",
+            )
 
-    def test_falls_back_to_tenant_only_filter(self):
-        """When all conditions are rejected, only tenant_id remains."""
-        result = build_safe_filter("school_students", [], "tenant_abc")
-        self.assertEqual(result, {"tenant_id": "tenant_abc"})
-
-    def test_injection_attempt_with_where(self):
-        """$where injection attempt must be scrubbed."""
-        conditions = [{"field": "student_name", "op": "$where", "value": "sleep(5000)"}]
-        result = build_safe_filter("school_students", conditions, "tenant_abc")
-        self.assertEqual(result, {"tenant_id": "tenant_abc"})
-
-
-class TestMaliciousLLMOutput(unittest.TestCase):
-    """End-to-end tests simulating malicious LLM outputs."""
-
-    def test_all_allowed_fields_are_innocuous(self):
-        """Verify each allowed field is actually a safe school data field."""
-        suspicious_keywords = ["password", "secret", "token", "key", "hash", "session"]
-        for coll, rules in FIELD_ALLOWLIST.items():
-            for field in rules["allowed_fields"]:
-                for kw in suspicious_keywords:
-                    self.assertNotIn(kw, field.lower(),
-                                     f"{coll}.{field} looks like a sensitive field")
-
-    def test_all_allowed_ops_are_safe(self):
-        """Verify only safe operators are in the allowlist."""
+    def test_registry_has_only_safe_fields_and_operators(self):
+        suspicious = {"password", "secret", "token", "key", "hash", "session", "tenant"}
         dangerous_ops = {"$where", "$expr", "$accumulator", "$function", "$regexMatch"}
-        for coll, rules in FIELD_ALLOWLIST.items():
-            for op in rules["allowed_ops"]:
-                self.assertNotIn(op, dangerous_ops,
-                                 f"{coll} allows dangerous operator {op}")
+        for spec in SCHOOL_ENTITY_REGISTRY.values():
+            for field_name, field_spec in spec.fields.items():
+                self.assertFalse(any(term in field_name.lower() for term in suspicious))
+                self.assertTrue(set(field_spec.operators).issubset(SAFE_OPERATORS))
+                self.assertFalse(set(field_spec.operators) & dangerous_ops)
 
 
 if __name__ == "__main__":

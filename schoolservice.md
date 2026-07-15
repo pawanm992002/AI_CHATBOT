@@ -66,11 +66,11 @@ flowchart TD
 |---|---|
 | `backend/services/school_data_service.py` | Entry point from chat service; invokes LangGraph and handles approval interrupts. |
 | `backend/services/school_agent/graph.py` | LangGraph agent, routing, prompt rules, read-tool node, approval node. |
-| `backend/services/school_agent/tools.py` | LangChain tools exposed to the agent. Includes new generic tools and legacy compatibility tools. |
+| `backend/services/school_agent/tools.py` | Registry-backed generic read/report tools, resolvers, and guarded write tools exposed to the agent. |
 | `backend/services/school_data_registry.py` | Metadata registry for entities, fields, operators, projections, sort fields, and relationships. |
 | `backend/services/school_data_engine.py` | Safe generic query engine and deterministic report engine. |
-| `backend/services/school_data_filter.py` | Older per-collection allowlist helper still used by legacy table-specific tools. |
 | `backend/tests/test_school_data_engine.py` | Tests for registry validation, tenant isolation, limit metadata, and due-fee report arithmetic. |
+| `backend/tests/test_school_query_safety.py` | Registry-backed query safety tests for tenant isolation, fields, and operators. |
 
 ## Why This Supports 200 Tables
 
@@ -101,12 +101,7 @@ mindmap
       explain_school_schema
     Deterministic Reports
       due_fees_by_student
-    Legacy Tools
-      query_students
-      query_applied_fees
-      query_payments
-      query_transport_assign
-      query_hostel_assign
+    Resolver Tools
       resolve_student_id
       resolve_class_id
 ```
@@ -242,10 +237,12 @@ get_school_report(report_id="due_fees_by_student")
 It calculates:
 
 ```text
-due_amount = amount - concession
+due_amount = max(amount - concession - payments recorded against the same applied fee, 0)
 ```
 
-from `school_applied_fees`. By default it includes:
+from `school_applied_fees` and `school_payments`. Payments are matched by
+`applied_fee_id`; an overpayment cannot make an individual fee record negative.
+By default the report includes:
 
 ```text
 Pending + Partial
@@ -264,6 +261,7 @@ sequenceDiagram
     participant Tool as get_school_report
     participant Engine as SchoolDataEngine
     participant Fees as school_applied_fees
+    participant Payments as school_payments
     participant Students as school_students
 
     Agent->>Tool: report_id="due_fees_by_student"
@@ -271,8 +269,10 @@ sequenceDiagram
     Engine->>Engine: Validate statuses and filters
     Engine->>Fees: Find fee rows scoped by tenant_id
     Fees-->>Engine: Pending/Partial fee rows
+    Engine->>Payments: Sum payments by applied_fee_id, scoped by tenant_id
+    Payments-->>Engine: Paid totals for matching fee records
     Engine->>Engine: Group by student_id
-    Engine->>Engine: Sum amount - concession
+    Engine->>Engine: Sum max(amount - concession - paid, 0)
     Engine->>Students: Fetch matching students scoped by tenant_id
     Students-->>Engine: Student names/admission/class/section
     Engine-->>Tool: total_due + student rows + metadata
@@ -284,7 +284,7 @@ Returned shape:
 ```json
 {
   "report_id": "due_fees_by_student",
-  "calculation_basis": "Due amount = sum(amount - concession) from school_applied_fees for selected statuses. Payments are not subtracted in this report.",
+  "calculation_basis": "Due amount = sum(max(amount - concession - payments recorded against each applied fee, 0)) for selected statuses.",
   "statuses": ["Pending", "Partial"],
   "total_due": "243800",
   "student_count": 26,
@@ -311,20 +311,55 @@ Returned shape:
 Because `total_due` and `rows` come from the same backend calculation, answers
 like "total due" and "student list with due amount" stay consistent.
 
+## Dashboard Administration
+
+The dashboard provides two tenant-authenticated school views. They use the
+signed-in dashboard user's JWT and always query the current school data; they
+do not depend on the browser widget or require the admin to enter school
+credentials again.
+
+- **School Records** searches students and loads the selected student's live
+  student, fee, payment, transport, and hostel records. It presents both the
+  amount on Pending/Partial fee records and the overall outstanding balance.
+  Each fee's outstanding amount is `max(amount - concession - payments for the
+  applied fee, 0)`.
+- **School Chat** starts the same LangGraph School Agent in School Mode for the
+  dashboard tenant. It stores a separate `dashboard-school-` session, reloads
+  its saved conversation, and renders the agent's Markdown response.
+
+```mermaid
+flowchart LR
+    Admin[Signed-in dashboard admin] --> JWT[Dashboard JWT]
+    JWT --> Records[School Records API]
+    JWT --> Chat[School Chat API]
+    Records --> Mongo[(Tenant-scoped live MongoDB data)]
+    Chat --> Mode[Activate School Mode for dashboard session]
+    Mode --> Agent[LangGraph School Agent]
+    Agent --> Engine[Registry-backed SchoolDataEngine]
+    Engine --> Mongo
+```
+
+Endpoints:
+
+- `GET /api/dashboard/school/students`
+- `GET /api/dashboard/school/students/{student_id}`
+- `POST /api/dashboard/school/chat`
+- `GET /api/dashboard/school/chat/{session_id}`
+
 ## Manoj Sir Mismatch Root Cause
 
 The earlier mismatch happened because the agent used low-level tools and the
 LLM tried to combine limited/incomplete rows.
 
-Problem pattern:
+Previous problem pattern, before the registry/report migration:
 
 ```mermaid
 flowchart TD
-    Q1[Ask total due] --> FeesTool[query_applied_fees]
+    Q1[Ask total due] --> FeesTool[Limited low-level fee query]
     FeesTool --> Limit20[Only first 20 rows possible]
     Limit20 --> LLMTotal[LLM summarizes total]
 
-    Q2[Ask student list] --> StudentsTool[query_students only]
+    Q2[Ask student list] --> StudentsTool[Limited low-level student query]
     StudentsTool --> NoFeeJoin[No deterministic fee join]
     NoFeeJoin --> Guess[LLM formats incomplete or wrong list]
 
@@ -388,40 +423,25 @@ flowchart TD
     Flag -->|Yes| Update[(MongoDB update scoped by tenant_id)]
 ```
 
-## Legacy `school_data_filter.py`
+## Registry Query Safety
 
-`school_data_filter.py` still protects older table-specific tools like
-`query_students`, `query_applied_fees`, and resolver tools. It uses
-`FIELD_ALLOWLIST` per collection.
+Every generic tool uses `SchoolDataEngine` and `school_data_registry.py`.
+The registry declares the only allowed fields and operators for each entity;
+the engine injects `tenant_id` server-side. Invalid entities, fields, and
+operators raise an error instead of being silently ignored.
 
 ```mermaid
 flowchart TD
-    Start["build_safe_filter(collection, conditions, tenant_id)"] --> Loop["For each condition"]
-    Loop --> Validate["validate_condition(collection, cond)"]
-    Validate --> CollectionCheck{"Collection in FIELD_ALLOWLIST?"}
-    CollectionCheck -->|No| Drop["Drop condition"]
-    CollectionCheck -->|Yes| FieldCheck{"Field allowed?"}
-    FieldCheck -->|No| Drop
-    FieldCheck -->|Yes| OpCheck{"Operator allowed?"}
-    OpCheck -->|No| Drop
-    OpCheck -->|Yes| RegexCheck{"op == $regex?"}
-    RegexCheck -->|Yes| RegexLength{"Value length <= 200?"}
-    RegexLength -->|No| Drop
-    RegexLength -->|Yes| RegexSafe["Case-insensitive regex fragment"]
-    RegexCheck -->|No| NormalSafe["Normal operator fragment"]
-    RegexSafe --> Add[Add safe condition]
-    NormalSafe --> Add
-    Drop --> Next{More conditions?}
-    Add --> Next
-    Next -->|Yes| Loop
-    Next -->|No| AnySafe{"Any valid conditions?"}
-    AnySafe -->|No| TenantOnly["Return tenant_id only"]
-    AnySafe -->|Yes| AndFilter["Return tenant_id AND safe conditions"]
+    Input[Structured entity/filter request] --> Entity[Resolve EntitySpec]
+    Entity --> Field{"Field registered?"}
+    Field -->|No| Error[Reject request]
+    Field -->|Yes| Operator{"Operator allowed for field?"}
+    Operator -->|No| Error
+    Operator -->|Yes| Regex{"Regex length within limit?"}
+    Regex -->|No| Error
+    Regex -->|Yes| Tenant[Inject tenant_id server-side]
+    Tenant --> Mongo[(Tenant-scoped MongoDB query)]
 ```
-
-The new `SchoolDataEngine` is stricter: invalid fields/operators raise errors
-instead of silently dropping conditions. That is better for generic tools
-because the agent can see that it asked for something invalid.
 
 ## Real Query Example
 
@@ -505,7 +525,8 @@ PYTHONPATH=backend uv run python -m unittest discover -s backend/tests -p "test_
 
 Important test coverage:
 
-- `test_school_query_safety.py`: legacy filter safety.
+- `test_school_query_safety.py`: registry field/operator validation and tenant
+  isolation safety.
 - `test_school_data_engine.py`: registry validation, tenant isolation, due-fee
   report totals, and limit metadata.
 - `test_school_agent.py`: LangGraph agent behavior, resolver tools, write

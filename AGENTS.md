@@ -99,7 +99,7 @@ open backend/templates/test_page.html
   1) **Over-limit active turn compression**: moves oldest turns to DO Spaces if a single session exceeds 60 messages.
   2) **Session completion trigger**: fully archives previous sessions to DO Spaces in the background when a visitor initializes a new chat session.
 - **De-archive on resume**: `get_full_conversation()` reconstructs full history by merging DO Spaces archive parts (JSONL, paginated via `list_objects_v2`) with in-MongoDB messages under `full_messages` key
-- **School ERP agent** uses LangGraph `StateGraph` with 3 nodes: `agent` (LLM + tool binding), `read_tools` (executes read-only tools), `approval` (human-in-the-loop via `interrupt()` for write operations). Write tools guarded by `SCHOOL_WRITE_ACTIONS_ENABLED` env var (default `False`). Entity names resolved to IDs before lookups (resolve-then-query pattern). All tool invocations logged to both `school_data_query_log` and `school_audit_log`.
+- **School ERP agent** uses LangGraph `StateGraph` with 3 nodes: `agent` (LLM + tool binding), `read_tools` (registry-backed reads/reports and resolvers), `approval` (human-in-the-loop via `interrupt()` for write operations). `SchoolDataEngine` validates every structured request against `school_data_registry.py` and injects `tenant_id` server-side; raw MongoDB queries from the LLM are never accepted. Write tools are guarded by `SCHOOL_WRITE_ACTIONS_ENABLED` (default `False`). The deterministic `due_fees_by_student` report subtracts payments recorded against each applied fee. All tool invocations are logged to both `school_data_query_log` and `school_audit_log`.
 - **NO_MATCH_EVALUATOR_WITH_ANSWER_PROMPT**: new evaluator classifies answered queries as `SUFFICIENT`, `OUT_OF_SCOPE`, or `NO_CONTEXT` — distinct from the existing `NO_MATCH_EVALUATOR_PROMPT` which only handles unanswered queries
 
 ### Frontend (TypeScript/React)
@@ -109,6 +109,7 @@ open backend/templates/test_page.html
 - Widget UI: includes a "+" (New Chat) button in the header to reset the current session and clear message history while preserving the visitor's long-lived identity
 - Shared types and hooks via `@chatbot/shared` workspace package
 - Widget auth via `Authorization: Bearer <api_key>` header; WebSocket uses SHA-256 hashed key as query param
+- School dashboard: `SchoolRecords` shows live tenant-scoped student, fee, payment, transport, and hostel records; `SchoolChat` invokes the same School Agent through dashboard JWT authentication and uses separate `dashboard-school-` sessions.
 
 ### Git
 - `master` is the production branch (triggers EC2 deploy via GitHub Actions)
@@ -136,8 +137,11 @@ open backend/templates/test_page.html
 | `backend/services/pdf_parser.py` | PDF text extraction via PyMuPDF (fitz), page-by-page markdown formatting |
 | `backend/config/models.json` | LLM model catalog — 20 models across 3 providers (OpenAI, Groq, OpenRouter) |
 | `backend/services/school_agent/graph.py` | LangGraph `StateGraph` for school ERP agent — 3 nodes (agent, read_tools, approval), human-in-the-loop via `interrupt()` for writes |
-| `backend/services/school_agent/tools.py` | 14 LangChain tools for school ERP — read tools (query 10 collections), resolver tools (fuzzy name→ID), write tools (guarded by env var) |
+| `backend/services/school_agent/tools.py` | 11 LangChain tools — generic read/report (6), resolver (2), write (3; guarded by env var) |
 | `backend/services/school_agent/README.md` | Architecture docs for LangGraph school agent (Mermaid diagram, tool categories, interrupt flow) |
+| `backend/services/school_data_registry.py` | Registry of school entities, safe fields/operators, projections, and relationships |
+| `backend/services/school_data_engine.py` | Tenant-scoped registry query engine and deterministic reports, including payment-aware fee due totals |
+| `backend/controllers/school_dashboard.py` | JWT-authenticated APIs for School Records and dashboard School Chat |
 | `backend/repositories/knowledge_gap_repository.py` | CRUD for knowledge gaps with vector similarity deduplication |
 | `backend/repositories/feedback_repository.py` | CRUD for message feedback (like/dislike) |
 | `backend/repositories/source_repository.py` | CRUD for knowledge sources |
@@ -163,16 +167,17 @@ open backend/templates/test_page.html
 | `backend/controllers/conversations.py` | Dashboard JWT-authenticated conversation detail + full history (merges DO Spaces archive) endpoints |
 | `packages/shared/src/types.ts` | Shared TypeScript interfaces (includes VisitorProfile, Visitor, LeadFormField with field_role) |
 | `scripts/seed_school_data.py` | Excel → MongoDB seeder for school ERP data (CLI: `--source-file`, `--dev`) |
-| `backend/services/school_data_service.py` | NL→MongoDB query engine for school data — entry point delegates to LangGraph agent, audit logging, session management, fee summary |
-| `backend/services/school_data_filter.py` | Query safety allowlists + `build_safe_filter()` for school collections |
+| `backend/services/school_data_service.py` | LangGraph School Agent entry point and Redis-backed School Mode lifecycle |
 | `backend/models/school_data.py` | Pydantic v2 schemas for all 10 school entities + audit log |
 | `backend/repositories/school_repository.py` | CRUD for schools, classes, sections |
 | `backend/repositories/school_student_repository.py` | CRUD for students (search, get by admission, by class) |
 | `backend/repositories/school_fee_repository.py` | CRUD for applied_fees + payments |
 | `backend/repositories/school_transport_repository.py` | CRUD for routes, stops, transport_assign |
 | `backend/repositories/school_hostel_repository.py` | CRUD for hostel_assign |
-| `backend/tests/test_school_query_safety.py` | 16 unit tests for query safety |
-| `backend/tests/test_school_agent.py` | 5 integration tests for LangGraph agent (resolve tools, multi-hop, write approval + resume, audit logging) |
+| `backend/tests/test_school_query_safety.py` | Registry validation and tenant-isolation safety tests |
+| `backend/tests/test_school_agent.py` | LangGraph resolver, relationship, write approval, and audit logging tests |
+| `apps/dashboard/src/pages/SchoolRecords.tsx` | Live student record search and details screen |
+| `apps/dashboard/src/pages/SchoolChat.tsx` | Dashboard School Mode chat with persisted history and Markdown responses |
 
 ## Database Collections
 

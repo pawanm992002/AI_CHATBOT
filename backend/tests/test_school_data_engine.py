@@ -161,10 +161,23 @@ class TestSchoolDataEngineReports(unittest.IsolatedAsyncioTestCase):
                 "tenant_id": self.other_tenant_id,
             },
         ])
+        await db.school_payments.insert_one({
+            "payment_id": 500,
+            "student_id": 1,
+            "applied_fee_id": 101,
+            "paid_amount": Decimal128("400.00"),
+            "balance": Decimal128("600.00"),
+            "payment_date": "2026-08-02",
+            "payment_mode": "UPI",
+            "receipt_no": "REC500",
+            "school_id": 1,
+            "tenant_id": self.tenant_id,
+        })
 
     async def asyncTearDown(self):
         await db.school_students.delete_many({"tenant_id": {"$in": [self.tenant_id, self.other_tenant_id]}})
         await db.school_applied_fees.delete_many({"tenant_id": {"$in": [self.tenant_id, self.other_tenant_id]}})
+        await db.school_payments.delete_many({"tenant_id": {"$in": [self.tenant_id, self.other_tenant_id]}})
 
     async def test_due_report_total_matches_rows(self):
         result = await school_data_engine.get_report(
@@ -174,7 +187,7 @@ class TestSchoolDataEngineReports(unittest.IsolatedAsyncioTestCase):
         )
         row_total = sum(Decimal(row["due_amount"]) for row in result["rows"])
 
-        self.assertEqual(Decimal(result["total_due"]), Decimal("8000.00"))
+        self.assertEqual(Decimal(result["total_due"]), Decimal("7600.00"))
         self.assertEqual(row_total, Decimal(result["total_due"]))
         self.assertEqual(result["student_count"], 2)
         self.assertEqual(result["fee_record_count"], 3)
@@ -199,7 +212,7 @@ class TestSchoolDataEngineReports(unittest.IsolatedAsyncioTestCase):
         names = {row["student_name"] for row in result["rows"]}
 
         self.assertNotIn("Other Tenant Student", names)
-        self.assertEqual(Decimal(result["total_due"]), Decimal("8000.00"))
+        self.assertEqual(Decimal(result["total_due"]), Decimal("7600.00"))
 
     async def test_search_entity_returns_limit_metadata(self):
         result = await school_data_engine.search_entity(

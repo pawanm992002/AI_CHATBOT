@@ -1306,11 +1306,11 @@ graph TD
     G --> C
     C -->|delegates to| I[LangGraph Agent<br/>StateGraph]
     I -->|3 nodes| J[Agent → Read/Resolve Tools<br/>→ Approval (writes)]
-    J -->|safe filters| K[Query Safety Layer]
-    K -->|validate against<br/>allowlists| L{Safe?}
-    L -->|Yes| M[MongoDB Query]
+    J -->|structured request| K[SchoolDataEngine]
+    K -->|registry validation +<br/>server-side tenant scope| L{Safe?}
+    L -->|Yes| M[MongoDB Query / Report]
     L -->|No| N[Reject]
-    M -->|Decimal128 → string| O[Return Results]
+    M -->|serialized result| O[Return Results]
 ```
 
 ### LangGraph Agent Flow
@@ -1319,12 +1319,12 @@ The school ERP agent uses a `StateGraph` with 3 nodes:
 
 | Node | Function |
 |------|----------|
-| **agent** | LLM (with 14 tool bindings) plans next action |
-| **read_tools** | Executes read-only queries (students, fees, transport, etc.) |
+| **agent** | LLM with 11 tool bindings plans the next action |
+| **read_tools** | Executes registry-backed reads, reports, and ID resolvers |
 | **approval** | Human-in-the-loop via `interrupt()` for write operations |
 
 **Tool categories:**
-- **10 read tools** — query students, classes, sections, teachers, applied fees, payments, routes, stops, transport assignments, hostel assignments
+- **6 generic read/report tools** — search, inspect a record, follow registered relationships, count entities, run deterministic reports, and explain the available schema
 - **2 resolver tools** — `resolve_student_id`, `resolve_class_id` for fuzzy name→ID lookups
 - **3 write tools** — `update_transport_status`, `update_hostel_status`, `update_fee_status` (guarded by `SCHOOL_WRITE_ACTIONS_ENABLED`, default `False`)
 
@@ -1367,38 +1367,31 @@ sequenceDiagram
 
 ### Query Safety Architecture
 
-The query safety layer (`school_data_filter.py`) is invoked inside the LangGraph agent's **read_tools** — the LLM proposes filter conditions via tool calls, and the tools apply `build_safe_filter()` before executing the query.
+The LLM never sends a raw MongoDB query. It sends a structured request to one of the generic tools. `SchoolDataEngine` resolves the requested entity through `school_data_registry.py`, accepts only registered fields and operators, bounds limits and regex input, then injects the authenticated `tenant_id` on the server. A request that does not match the registry is rejected.
 
 ```mermaid
 sequenceDiagram
     participant User
     participant LangGraph Agent
-    participant Read Tool
-    participant Query Safety Layer
+    participant Generic Tool
+    participant SchoolDataEngine
+    participant Registry
     participant MongoDB
 
     User->>LangGraph Agent: "Show pending fees for Class 10"
-    LangGraph Agent->>LangGraph Agent: Resolve entity names → IDs
-    LangGraph Agent->>Read Tool: query_applied_fees(filter: {status: "Pending", class_id: "..."})
-    Read Tool->>Query Safety Layer: build_safe_filter(collection, conditions)
-    Query Safety Layer->>Query Safety Layer: Validate against allowlist
-    Query Safety Layer->>Query Safety Layer: Inject tenant_id (never from LLM)
-    Query Safety Layer-->>Read Tool: Safe filter
-    Read Tool->>MongoDB: Execute safe query
-    MongoDB-->>Read Tool: Results (Decimal128 serialized)
-    Read Tool-->>LangGraph Agent: Formatted response
+    LangGraph Agent->>Generic Tool: get_school_report(filters, limit)
+    Generic Tool->>SchoolDataEngine: get_report(tenant_id, report_id, filters)
+    SchoolDataEngine->>Registry: Resolve entity/report metadata
+    Registry-->>SchoolDataEngine: Allowed fields, operators, relationships
+    SchoolDataEngine->>SchoolDataEngine: Validate input and inject tenant_id
+    SchoolDataEngine->>MongoDB: Execute tenant-scoped query/report
+    MongoDB-->>SchoolDataEngine: Results
+    SchoolDataEngine-->>Generic Tool: Serialized result + limit metadata
+    Generic Tool-->>LangGraph Agent: Tool result
     LangGraph Agent-->>User: Final answer
 ```
 
-**Allowlisted Fields per Collection:**
-
-| Collection | Allowed Filter Fields |
-|---|---|
-| `school_students` | `tenant_id`, `class_id`, `section_id`, `admission_no`, `first_name`, `status` |
-| `school_applied_fees` | `tenant_id`, `student_id`, `status` (`Pending`, `Partial`, `Paid`), `due_date` |
-| `school_payments` | `tenant_id`, `student_id`, `mode`, `reference_no` |
-| `school_transport_assign` | `tenant_id`, `student_id`, `stop_id`, `route_id`, `status` (`Active`, `Inactive`) |
-| `school_hostel_assign` | `tenant_id`, `student_id`, `room_no`, `block`, `status` (`Active`, `Vacated`) |
+The registry is the extension point for a school with many tables: add an `EntitySpec` with its safe fields, operators, projection, and relationships. New tables normally use the existing generic tools; a new tool is only needed for a genuinely new capability. Financial totals use deterministic reports, not LLM arithmetic over paginated rows. In particular, `due_fees_by_student` calculates `max(amount - concession - payments against that applied fee, 0)` for each selected fee record.
 
 ### Data Seeding
 
@@ -1439,17 +1432,30 @@ python scripts/seed_school_data.py --source-file sample_data/school_erp_sample.x
 4. **Write actions** (requires approval): "Deactivate transport for student Ansh" triggers an `interrupt()` — an admin must approve before execution
 5. **Exit**: Type `/exit` or `/logout` to leave school mode (also auto-exits after 30 min inactivity)
 
+### School Dashboard
+
+Signed-in tenant administrators also have two dashboard screens and do not need to enter widget credentials again:
+
+- **School Records** searches the school’s live MongoDB records and shows a selected student’s fees, payments, transport, and hostel information. It distinguishes pending/partial fee status amounts from the overall outstanding balance. Per-fee outstanding is `max(amount - concession - payments against that applied fee, 0)`.
+- **School Chat** runs the same School Agent for the dashboard tenant, automatically activates School Mode, stores its own `dashboard-school-` session, reloads conversation history, and renders assistant Markdown.
+
+The JWT-authenticated APIs are `GET /api/dashboard/school/students`, `GET /api/dashboard/school/students/{student_id}`, `POST /api/dashboard/school/chat`, and `GET /api/dashboard/school/chat/{session_id}`.
+
 ### Key Files
 
 | File | Purpose |
 |---|---|
 | `scripts/seed_school_data.py` | Excel → MongoDB seeder (CLI: `--source-file`, `--dev`) |
-| `backend/services/school_data_service.py` | NL→MongoDB query engine — entry point delegates to LangGraph agent, audit logging, session management, fee summary |
-| `backend/services/school_data_filter.py` | Query safety allowlists + `build_safe_filter()` |
+| `backend/services/school_data_service.py` | LangGraph entry point and Redis-backed School Mode session lifecycle |
+| `backend/services/school_data_registry.py` | Entity metadata: safe fields/operators, projections, search settings, and relationships |
+| `backend/services/school_data_engine.py` | Registry-backed tenant-scoped queries, relationship traversal, and deterministic reports |
 | `backend/services/school_agent/graph.py` | LangGraph `StateGraph` — 3 nodes (agent, read_tools, approval), human-in-the-loop via `interrupt()` |
-| `backend/services/school_agent/tools.py` | 14 LangChain tools — read (10), resolver (2), write (3) — guarded by env var |
+| `backend/services/school_agent/tools.py` | 11 LangChain tools — generic read/report (6), resolver (2), write (3) — guarded by env var |
+| `backend/controllers/school_dashboard.py` | JWT-authenticated student records and School Chat APIs for the dashboard |
+| `apps/dashboard/src/pages/SchoolRecords.tsx` | Live student record search and detail screen |
+| `apps/dashboard/src/pages/SchoolChat.tsx` | Dashboard School Mode chat with persisted conversation history |
 | `backend/services/school_agent/README.md` | Architecture docs with Mermaid diagram |
 | `backend/models/school_data.py` | Pydantic v2 schemas for all 10 entities |
 | `backend/repositories/school_*.py` | CRUD repositories per entity |
-| `backend/tests/test_school_query_safety.py` | 16 unit tests for query safety |
-| `backend/tests/test_school_agent.py` | 5 integration tests for LangGraph agent |
+| `backend/tests/test_school_query_safety.py` | Registry validation and tenant-scoping safety tests |
+| `backend/tests/test_school_agent.py` | LangGraph resolver, relationship, approval, and audit tests |

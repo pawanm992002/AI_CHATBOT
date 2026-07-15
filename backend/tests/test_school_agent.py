@@ -144,15 +144,15 @@ class TestSchoolAgent(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Class 3", result_str)
         self.assertIn("class_id", result_str)
 
-    async def test_multi_hop_query(self):
-        # Querying for transport status by student name
+    async def test_student_transport_query(self):
+        # Querying for transport status by student name resolves the student first.
         result = await self.service.query(
             tenant_id=self.tenant_id,
             session_id=self.session_id,
             question="what is the transport status for student Ansh?"
         )
         self.assertIn("Active", result)
-        self.assertIn("Mansarovar", result)
+        self.assertIn("BUS09", result)
 
     async def test_write_approval_interception_and_resume(self):
         # Make a write request

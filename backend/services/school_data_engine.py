@@ -297,6 +297,18 @@ class SchoolDataEngine:
             [("student_id", 1), ("applied_fee_id", 1)]
         ).to_list(length=None)
 
+        applied_fee_ids = [fee["applied_fee_id"] for fee in fees if fee.get("applied_fee_id") is not None]
+        paid_by_fee: dict[int, Decimal] = defaultdict(lambda: Decimal("0"))
+        if applied_fee_ids:
+            payments = await db.school_payments.find(
+                {"tenant_id": tenant_id, "applied_fee_id": {"$in": applied_fee_ids}},
+                {"_id": 0, "applied_fee_id": 1, "paid_amount": 1},
+            ).to_list(length=None)
+            for payment in payments:
+                applied_fee_id = payment.get("applied_fee_id")
+                if applied_fee_id is not None:
+                    paid_by_fee[applied_fee_id] += to_decimal(payment.get("paid_amount"))
+
         by_student: dict[int, dict[str, Any]] = defaultdict(
             lambda: {
                 "student_id": None,
@@ -310,7 +322,9 @@ class SchoolDataEngine:
             student_id = fee.get("student_id")
             amount = to_decimal(fee.get("amount"))
             concession = to_decimal(fee.get("concession"))
-            due_amount = amount - concession
+            net_amount = amount - concession
+            paid_amount = paid_by_fee[fee.get("applied_fee_id")]
+            due_amount = max(net_amount - paid_amount, Decimal("0"))
             total_due += due_amount
 
             row = by_student[student_id]
@@ -322,6 +336,7 @@ class SchoolDataEngine:
                 "fee_head": fee.get("fee_head"),
                 "amount": serialize_value(amount),
                 "concession": serialize_value(concession),
+                "paid_amount": serialize_value(paid_amount),
                 "due_amount": serialize_value(due_amount),
                 "status": fee.get("status"),
                 "due_date": fee.get("due_date"),
@@ -375,7 +390,7 @@ class SchoolDataEngine:
         returned_rows = rows[:safe_limit]
         return {
             "report_id": "due_fees_by_student",
-            "calculation_basis": "Due amount = sum(amount - concession) from school_applied_fees for selected statuses. Payments are not subtracted in this report.",
+            "calculation_basis": "Due amount = sum(max(amount - concession - payments recorded against each applied fee, 0)) for selected statuses.",
             "statuses": list(statuses),
             "filters": filters,
             "total_due": serialize_value(filtered_total_due),

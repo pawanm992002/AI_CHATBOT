@@ -182,8 +182,20 @@ async def get_student_record(
             ),
         )
 
-    fees = serialize_documents(fees)
     payments = serialize_documents(payments)
+    paid_by_fee: dict[int, Decimal] = {}
+    for payment in payments:
+        applied_fee_id = payment.get("applied_fee_id")
+        if applied_fee_id is not None:
+            paid_by_fee[int(applied_fee_id)] = paid_by_fee.get(int(applied_fee_id), Decimal("0")) + to_decimal(payment.get("paid_amount"))
+
+    fees = serialize_documents(fees)
+    for fee in fees:
+        net_amount = to_decimal(fee.get("amount")) - to_decimal(fee.get("concession"))
+        paid_amount = paid_by_fee.get(int(fee.get("applied_fee_id", 0)), Decimal("0"))
+        fee["paid_amount"] = _money(paid_amount)
+        fee["outstanding_amount"] = _money(net_amount - paid_amount)
+
     net_assigned = sum((to_decimal(fee.get("amount")) - to_decimal(fee.get("concession")) for fee in fees), Decimal("0"))
     total_paid = sum((to_decimal(payment.get("paid_amount")) for payment in payments), Decimal("0"))
     due_row = due_report["rows"][0] if due_report["rows"] else None
@@ -200,8 +212,9 @@ async def get_student_record(
         "summary": {
             "net_assigned": _money(net_assigned),
             "total_paid": _money(total_paid),
-            "agent_due": due_row.get("due_amount", "0") if due_row else "0",
-            "due_fee_records": due_row.get("fee_record_count", 0) if due_row else 0,
+            "outstanding_balance": _money(net_assigned - total_paid),
+            "pending_partial_due": due_row.get("due_amount", "0") if due_row else "0",
+            "pending_partial_fee_records": due_row.get("fee_record_count", 0) if due_row else 0,
             "calculation_basis": due_report["calculation_basis"],
             "statuses": due_report["statuses"],
         },
