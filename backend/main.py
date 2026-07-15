@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import FileResponse, RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
-from controllers import tenants, crawl, chat, sources, faqs, text_docs, leads, admin, knowledge_improvement, providers, admin_analytics, visitor_profiles, conversations
+from controllers import tenants, crawl, chat, sources, faqs, text_docs, leads, admin, knowledge_improvement, providers, admin_analytics, visitor_profiles, conversations, school_dashboard
 from core.auth import db
 from fastapi.staticfiles import StaticFiles
 import os
@@ -49,6 +49,7 @@ app.include_router(knowledge_improvement.router, prefix="/api")
 app.include_router(providers.router, prefix="/api")
 app.include_router(visitor_profiles.router, prefix="/api")
 app.include_router(conversations.router, prefix="/api")
+app.include_router(school_dashboard.router, prefix="/api")
 
 backend_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.abspath(os.path.join(backend_dir, ".."))

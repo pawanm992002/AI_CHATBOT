@@ -20,6 +20,8 @@ import AIProvider from './pages/AIProvider';
 import VisitorProfiles from './pages/VisitorProfiles';
 import AdminLogin from './pages/AdminLogin';
 import AdminTenants from './pages/AdminTenants';
+import SchoolRecords from './pages/SchoolRecords';
+import SchoolChat from './pages/SchoolChat';
 
 // Lazy-loaded pages (code-split)
 const AdminAnalytics = lazy(() => import('./pages/AdminAnalytics'));
@@ -231,6 +233,8 @@ const App = () => {
           <Route path="/leads" element={<PrivateRoute><Leads /></PrivateRoute>} />
           <Route path="/ai-provider" element={<PrivateRoute><AIProvider /></PrivateRoute>} />
           <Route path="/visitor-profiles" element={<PrivateRoute><VisitorProfiles /></PrivateRoute>} />
+          <Route path="/school-records" element={<PrivateRoute><SchoolRecords /></PrivateRoute>} />
+          <Route path="/school-chat" element={<PrivateRoute><SchoolChat /></PrivateRoute>} />
           <Route path="/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
           <Route path="/admin/login" element={<AdminGuestRoute><AdminLogin /></AdminGuestRoute>} />
           <Route path="/admin/tenants" element={<AdminRoute><AdminTenants /></AdminRoute>} />

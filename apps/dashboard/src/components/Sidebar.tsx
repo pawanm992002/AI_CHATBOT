@@ -12,6 +12,8 @@ import {
   Clock,
   Brain,
   Tag,
+  School,
+  MessagesSquare,
 } from 'lucide-react';
 import { publicAxios } from '../utils/axios';
 import { useStore } from '../store';
@@ -27,7 +29,7 @@ export const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
   const { state, dispatch } = useStore();
 
   const handleLogout = async () => {
-    try { await publicAxios.post('/tenants/logout'); } catch {}
+    try { await publicAxios.post('/tenants/logout'); } catch { /* Cookie may already be cleared. */ }
     dispatch({ type: 'RESET_STORE' });
     navigate('/login');
   };
@@ -46,6 +48,8 @@ export const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
     { label: 'Leads', icon: Users, path: '/leads' },
     { label: 'AI Provider', icon: Brain, path: '/ai-provider' },
     { label: 'Visitor Profiles', icon: Tag, path: '/visitor-profiles' },
+    { label: 'School Records', icon: School, path: '/school-records' },
+    { label: 'School Chat', icon: MessagesSquare, path: '/school-chat' },
     { label: 'Settings', icon: Settings, path: '/settings' },
   ];
 

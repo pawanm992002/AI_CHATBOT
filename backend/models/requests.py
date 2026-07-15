@@ -31,6 +31,11 @@ class ChatRequest(BaseModel):
     current_page_title: str
 
 
+class DashboardSchoolChatRequest(BaseModel):
+    query: str = Field(..., min_length=1, max_length=500)
+    session_id: Optional[str] = None
+
+
 class SourceCreateRequest(BaseModel):
     source_type: str = Field(..., pattern=r"^(pdf|faq|text|website)$")
     name: str

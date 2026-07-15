@@ -21,6 +21,8 @@ export const Topbar = ({ onMenuToggle }: TopbarProps) => {
     if (pathname.startsWith('/knowledge')) return 'Knowledge Gaps';
     if (pathname.startsWith('/leads')) return 'Leads & Enquiries';
     if (pathname.startsWith('/ai-provider')) return 'AI Provider';
+    if (pathname.startsWith('/school-records')) return 'School Records';
+    if (pathname.startsWith('/school-chat')) return 'School Chat';
     if (pathname.startsWith('/settings')) return 'Settings';
     if (pathname.startsWith('/admin')) return 'System Administration';
     return 'Dashboard';
