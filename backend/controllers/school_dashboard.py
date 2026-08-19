@@ -192,7 +192,8 @@ async def get_student_record(
     fees = serialize_documents(fees)
     for fee in fees:
         net_amount = to_decimal(fee.get("amount")) - to_decimal(fee.get("concession"))
-        paid_amount = paid_by_fee.get(int(fee.get("applied_fee_id", 0)), Decimal("0"))
+        fee_applied_fee_id = fee.get("applied_fee_id")
+        paid_amount = paid_by_fee.get(int(fee_applied_fee_id), Decimal("0")) if fee_applied_fee_id is not None else Decimal("0")
         fee["paid_amount"] = _money(paid_amount)
         fee["outstanding_amount"] = _money(net_amount - paid_amount)
 

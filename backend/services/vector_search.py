@@ -1,4 +1,13 @@
 import asyncio
+import time
+from pymongo.errors import (
+    AutoReconnect,
+    ConnectionFailure,
+    ExecutionTimeout,
+    NetworkTimeout,
+    ServerSelectionTimeoutError,
+    WaitQueueTimeoutError,
+)
 from core.auth import db
 from services.embedder import embed_text
 from services.tokens import count_tokens
@@ -6,6 +15,43 @@ from services.tokens import count_tokens
 MAX_PARENT_CONTEXT_TOKENS = 1600
 CHILD_CONTEXT_RADIUS = 1
 BM25_INDEX_NAME = "BM25_textsearch"
+
+SEARCH_RETRY_ATTEMPTS = 2
+# Delay (seconds) before each retry; doubles per retry if SEARCH_RETRY_ATTEMPTS is
+# raised above 2 (with the current value there is only ever one retry, at this delay).
+SEARCH_RETRY_BASE_DELAY = 0.3
+
+# Only retry errors that are plausibly transient (dropped connection, server
+# election, timeout). Anything else (bad pipeline, missing index, auth) is
+# permanent for this request and retrying it just adds latency for no benefit.
+RETRYABLE_ERRORS = (
+    AutoReconnect,
+    ConnectionFailure,
+    ExecutionTimeout,
+    NetworkTimeout,
+    ServerSelectionTimeoutError,
+    WaitQueueTimeoutError,
+)
+
+
+async def _with_retry(coro_fn, *, label: str, attempts: int = SEARCH_RETRY_ATTEMPTS):
+    last_exc = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return await coro_fn()
+        except RETRYABLE_ERRORS as e:
+            last_exc = e
+            if attempt < attempts:
+                delay = SEARCH_RETRY_BASE_DELAY * (2 ** (attempt - 1))
+                print(f"[VECTOR_SEARCH] {label} failed (attempt {attempt}/{attempts}): {e!r}, retrying in {delay}s")
+                await asyncio.sleep(delay)
+            else:
+                print(f"[VECTOR_SEARCH] {label} failed (attempt {attempt}/{attempts}), giving up: {e!r}")
+        except Exception as e:
+            print(f"[VECTOR_SEARCH] {label} failed with non-retryable error: {e!r}")
+            raise
+    raise last_exc
+
 
 async def _vector_search(tenant_id: str, query_vector: list[float], limit: int) -> list[dict]:
     pipeline = [
@@ -24,41 +70,60 @@ async def _vector_search(tenant_id: str, query_vector: list[float], limit: int) 
                       "section_title": 1, "section_path": 1, "chunk_index": 1,
                       "parent_index": 1, "child_index": 1, "token_count": 1, "score": 1}},
     ]
-    return await db.chunks.aggregate(pipeline).to_list(length=limit)
+    return await _with_retry(
+        lambda: db.chunks.aggregate(pipeline).to_list(length=limit),
+        label="vector_search",
+    )
 
 
 async def _bm25_search(tenant_id: str, query: str, top_k: int) -> list[dict]:
+    pipeline = [
+        {
+            "$search": {
+                "index": BM25_INDEX_NAME,
+                "text": {"query": query, "path": ["text", "section_title"]}
+            }
+        },
+        {"$match": {"tenant_id": tenant_id}},
+        {"$addFields": {"score": {"$meta": "searchScore"}}},
+        {"$project": {"_id": 0, "text": 1, "url": 1, "title": 1, "parent_id": 1,
+                      "section_title": 1, "section_path": 1, "chunk_index": 1,
+                      "parent_index": 1, "child_index": 1, "token_count": 1, "score": 1}},
+        {"$limit": top_k},
+    ]
     try:
-        pipeline = [
-            {
-                "$search": {
-                    "index": BM25_INDEX_NAME,
-                    "text": {"query": query, "path": ["text", "section_title"]}
-                }
-            },
-            {"$match": {"tenant_id": tenant_id}},
-            {"$addFields": {"score": {"$meta": "searchScore"}}},
-            {"$project": {"_id": 0, "text": 1, "url": 1, "title": 1, "parent_id": 1,
-                          "section_title": 1, "section_path": 1, "chunk_index": 1,
-                          "parent_index": 1, "child_index": 1, "token_count": 1, "score": 1}},
-            {"$limit": top_k},
-        ]
-        return await db.chunks.aggregate(pipeline).to_list(length=top_k)
-    except Exception:
-        # If BM25 index doesn't exist yet, silently skip
+        return await _with_retry(
+            lambda: db.chunks.aggregate(pipeline).to_list(length=top_k),
+            label="bm25_search",
+        )
+    except Exception as e:
+        # BM25 is a secondary signal (vector search still runs) - degrade instead of failing the request,
+        # but log loudly since a broken/missing index here used to fail silently and was hard to diagnose.
+        print(f"[VECTOR_SEARCH] bm25_search unavailable after retries, continuing without it: {e!r}")
         return []
 
 
 async def search_chunks(tenant_id: str, query: str, top_k: int = 12):
+    # embed_text's underlying OpenAIEmbeddings client already retries transient
+    # failures internally (embedder.py's max_retries=3) - retrying again here
+    # would only compound backoff on top of it, so we just time and propagate.
+    embed_start = time.monotonic()
     query_vector = await embed_text(query)
+    print(f"[VECTOR_SEARCH] embed_text took {time.monotonic() - embed_start:.3f}s")
+
     vector_slots = max(int(top_k * 0.6), 1)   # 60% vector
     bm25_slots = top_k - vector_slots          # 40% BM25
     child_limit = vector_slots * 4             # more candidates for diversity
 
+    search_start = time.monotonic()
     # Run vector search and BM25 search in parallel
     vector_task = _vector_search(tenant_id, query_vector, child_limit)
     bm25_task = _bm25_search(tenant_id, query, bm25_slots * 3)
     vector_results, bm25_results = await asyncio.gather(vector_task, bm25_task)
+    print(
+        f"[VECTOR_SEARCH] vector={len(vector_results)} bm25={len(bm25_results)} "
+        f"results in {time.monotonic() - search_start:.3f}s"
+    )
 
     # Guaranteed slots: 3 from vector, 2 from BM25, deduplicated
     seen_ids = set()
